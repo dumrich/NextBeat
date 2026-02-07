@@ -189,7 +189,7 @@ export function usePlayback(
         lastStartBars = adjustedStartBars;
       });
     });
-  }, [project, tempo, snapGrid, getSynthesizer]);
+  }, [project, tempo, getSynthesizer]);
 
   // Update playhead position during playback
   useEffect(() => {
