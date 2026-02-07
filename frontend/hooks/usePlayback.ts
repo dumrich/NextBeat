@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import * as Tone from 'tone';
 import type { Project, MidiNote } from '@/types/project';
 import { useInstruments } from './useInstruments';
 
 // Convert MIDI ticks to Tone.js time (in bars)
-// Assuming 1920 ticks per bar (standard MIDI resolution)
+// Assuming 1920 ticks per bar (standard MIDI resolution: 480 ticks per quarter note * 4)
 const TICKS_PER_BAR = 1920;
 
 function ticksToBars(ticks: number): number {
@@ -33,7 +33,8 @@ export function usePlayback(
   const playheadUpdateRef = useRef<number | null>(null);
 
   // Schedule all MIDI notes for playback
-  const scheduleNotes = () => {
+  // Use useCallback to ensure it uses the latest tempo and project
+  const scheduleNotes = useCallback(() => {
     if (!project) return;
 
     // Clear any existing scheduled events
@@ -87,8 +88,11 @@ export function usePlayback(
       
       allNotes.forEach(({ note, clipStartBars }) => {
         const noteStartBars = clipStartBars + ticksToBars(note.startTick);
+        // Apply tempo scaling: divide by (tempo / 240)
+        // This ensures notes play at the correct positions relative to tempo
+        const tempoScaledBars = noteStartBars / (tempo / 240);
         // Round to avoid floating point precision issues
-        const roundedStartBars = Math.round(noteStartBars * 10000) / 10000;
+        const roundedStartBars = Math.round(tempoScaledBars * 10000) / 10000;
         
         if (!notesByStartTime.has(roundedStartBars)) {
           notesByStartTime.set(roundedStartBars, []);
@@ -100,9 +104,14 @@ export function usePlayback(
       const sortedStartTimes = Array.from(notesByStartTime.keys()).sort((a, b) => a - b);
 
       // Get current transport time in bars to ensure we don't schedule notes in the past
-      const currentTransportBars = Tone.getTransport().seconds > 0 
-        ? (Tone.getTransport().seconds / 60) * (tempo / 4)
+      // Use the actual Transport BPM (not the tempo parameter) to calculate current position
+      // Apply the same tempo scaling factor for consistency
+      const transportBpm = Tone.getTransport().bpm.value;
+      const currentTransportBarsRaw = Tone.getTransport().seconds > 0 
+        ? (Tone.getTransport().seconds / 60) * (transportBpm / 4)
         : 0;
+      // Apply tempo scaling to match how we scale note positions
+      const currentTransportBars = currentTransportBarsRaw / (tempo / 240);
       
       // Add a small safety margin to ensure notes are scheduled in the future
       // This prevents notes at time 0 from being missed if transport has already started
@@ -180,7 +189,7 @@ export function usePlayback(
         lastStartBars = adjustedStartBars;
       });
     });
-  };
+  }, [project, tempo, snapGrid, getSynthesizer]);
 
   // Update playhead position during playback
   useEffect(() => {
@@ -197,8 +206,10 @@ export function usePlayback(
       const seconds = Tone.getTransport().seconds;
       
       // Convert seconds to bars: (seconds / 60) * (bpm / beats_per_bar)
+      // Use the actual Transport BPM (not the tempo parameter) for accuracy
       // Assuming 4/4 time signature (4 beats per bar)
-      const bars = (seconds / 60) * (tempo / 4);
+      const transportBpm = Tone.getTransport().bpm.value;
+      const bars = (seconds / 60) * (transportBpm / 4);
       
       setPlayheadPosition(bars);
       playheadUpdateRef.current = requestAnimationFrame(update);
@@ -214,16 +225,35 @@ export function usePlayback(
     };
   }, [isPlaying, tempo, setPlayheadPosition]);
 
-  // Schedule notes when playback starts
+  // Schedule notes when playback starts or tempo changes
   useEffect(() => {
     if (isPlaying && project) {
+      // Set BPM synchronously first - this is critical for proper timing
       Tone.getTransport().bpm.value = tempo;
-      // Schedule notes immediately (before or right as transport starts)
-      // Use a very small delay to ensure Transport context is ready
-      const timeout = setTimeout(() => {
+      
+      // Clear any existing events first to prevent duplicates
+      scheduledEventsRef.current.forEach((event) => event.dispose());
+      scheduledEventsRef.current = [];
+      
+      // Schedule notes using requestAnimationFrame to ensure Transport state is ready
+      // This gives Tone.js a moment to process the BPM change
+      const scheduleId = requestAnimationFrame(() => {
+        // Double-check BPM was set correctly (sometimes needs a moment to apply)
+        const currentBpm = Tone.getTransport().bpm.value;
+        if (Math.abs(currentBpm - tempo) > 0.1) {
+          // If BPM didn't set correctly, set it again
+          Tone.getTransport().bpm.value = tempo;
+        }
+        // Now schedule all notes with the correct BPM
         scheduleNotes();
-      }, 1);
-      return () => clearTimeout(timeout);
+      });
+      
+      return () => {
+        cancelAnimationFrame(scheduleId);
+        // Cleanup: dispose all scheduled events
+        scheduledEventsRef.current.forEach((event) => event.dispose());
+        scheduledEventsRef.current = [];
+      };
     } else {
       // Clear scheduled events when stopped
       scheduledEventsRef.current.forEach((event) => event.dispose());

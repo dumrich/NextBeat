@@ -6,7 +6,10 @@ import { useState, useRef, useEffect } from 'react';
 import { useInstruments } from '@/hooks/useInstruments';
 
 const NOTES = [
-  'C7', 'B6', 'A#6', 'A6', 'G#6', 'G6', 'F#6', 'F6', 'E6', 'D#6', 'D6', 'C#6', 'C6',
+  'C9',
+  'B8', 'A#8', 'A8', 'G#8', 'G8', 'F#8', 'F8', 'E8', 'D#8', 'D8', 'C#8', 'C8',
+  'B7', 'A#7', 'A7', 'G#7', 'G7', 'F#7', 'F7', 'E7', 'D#7', 'D7', 'C#7', 'C7',
+  'B6', 'A#6', 'A6', 'G#6', 'G6', 'F#6', 'F6', 'E6', 'D#6', 'D6', 'C#6', 'C6',
   'B5', 'A#5', 'A5', 'G#5', 'G5', 'F#5', 'F5', 'E5', 'D#5', 'D5', 'C#5', 'C5',
   'B4', 'A#4', 'A4', 'G#4', 'G4', 'F#4', 'F4', 'E4', 'D#4', 'D4', 'C#4', 'C4',
   'B3', 'A#3', 'A3', 'G#3', 'G3', 'F#3', 'F3', 'E3', 'D#3', 'D3', 'C#3', 'C3',
@@ -16,8 +19,7 @@ const NOTES = [
 const TOOLS = [
   'select',
   'draw',
-  'erase',
-  'slice',
+  'erase'
 ];
 
 const SNAPGRID_TO_FRACTION: { [key: string]: number } = {
@@ -40,6 +42,8 @@ export default function PianoRollView() {
     setSelectedTool, 
     snapGrid, 
     songLength,
+    playheadPosition,
+    isPlaying,
     addMidiClip,
     updateMidiClip,
     addArrangementClip,
@@ -94,9 +98,40 @@ export default function PianoRollView() {
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in input fields
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // Tool switching shortcuts (only when no modifiers are pressed)
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
+        if (e.key === 's' || e.key === 'S') {
+          e.preventDefault();
+          setSelectedTool('select');
+          return;
+        }
+        if (e.key === 'd' || e.key === 'D') {
+          e.preventDefault();
+          setSelectedTool('draw');
+          return;
+        }
+        if (e.key === 'e' || e.key === 'E') {
+          e.preventDefault();
+          setSelectedTool('erase');
+          return;
+        }
+      }
+
+      // Undo shortcut
       if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
         undo();
+      }
+
+      // Ctrl/Cmd + E: Erase All
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'e' || e.key === 'E')) {
+        e.preventDefault();
+        handleEraseAll();
       }
       
       // Delete selected notes
@@ -111,7 +146,7 @@ export default function PianoRollView() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, selectedTool, selectedNoteIndices, activeClip, updateMidiClip]);
+  }, [undo, selectedTool, selectedNoteIndices, activeClip, updateMidiClip, setSelectedTool, handleEraseAll]);
 
   // Ensure we have a clip to work with
   const ensureActiveClip = () => {
@@ -541,7 +576,7 @@ export default function PianoRollView() {
           }`} 
           onClick={() => setSelectedTool(tool as Tool)}
         >
-          {tool.charAt(0).toUpperCase() + tool.slice(1)}
+          {tool.charAt(0).toUpperCase() + tool.slice(1)} ({tool.charAt(0).toUpperCase()}) 
         </button>
         ))}
         <button 
@@ -592,6 +627,16 @@ export default function PianoRollView() {
 
           {/* Note Grid */}
           <div className="flex-1 relative" style={{ height: totalNotesHeight }}>
+            {/* Playhead - vertical white line */}
+            {isPlaying && (
+              <div
+                className="absolute top-0 bottom-0 w-0.5 bg-white z-30 pointer-events-none"
+                style={{
+                  left: `${playheadPosition * pixelsPerBar * SNAPGRID_TO_FRACTION[snapGrid]}px`,
+                }}
+              />
+            )}
+
             {/* Grid Lines */}
             {Array.from({ length: songLength * SNAPGRID_TO_FRACTION[snapGrid] }, (_, i) => (
               <div
