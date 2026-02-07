@@ -73,6 +73,7 @@ export function useInstruments(tracks: Track[]) {
 
     // Check if it's a SoundFont instrument
     if (synth instanceof SoundfontInstrument) {
+      console.log(synth);
       try {
         // Convert note name to MIDI note number
         const midiNote = noteNameToMidi(note);
@@ -80,9 +81,10 @@ export function useInstruments(tracks: Track[]) {
           const velocityValue = velocity !== undefined ? velocity : 100;
           const noteDuration = duration || '8n';
           // triggerAttackRelease is async, but we don't need to await it for preview
-          synth.triggerAttackRelease(midiNote, noteDuration, time, velocityValue).catch(() => {
+          synth.triggerAttackRelease(midiNote, noteDuration, undefined, velocityValue * 100).catch(() => {
             // Error playing note - silently fail
           });
+          console.log('Playing note', note, noteDuration);
         }
       } catch (error) {
         // Error in playNote - silently fail

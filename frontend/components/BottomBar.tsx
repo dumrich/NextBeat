@@ -1,7 +1,7 @@
 'use client';
 
 import { useProjectStore } from '@/stores/projectStore';
-import { exportProjectToMidi, downloadMidi, importMidiFile } from '@/utils/midiExport';
+import { exportProjectToMidi, downloadMidi, importMidiFile, convertMp3ToMidi } from '@/utils/midiExport';
 import { useState, useRef } from 'react';
 
 export default function BottomBar() {
@@ -17,6 +17,7 @@ export default function BottomBar() {
   } = useProjectStore();
   const [exportStatus, setExportStatus] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mp3FileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExportMidi = () => {
     if (!project) return;
@@ -37,6 +38,10 @@ export default function BottomBar() {
     fileInputRef.current?.click();
   };
 
+  const handleImportMp3 = () => {
+    mp3FileInputRef.current?.click();
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -55,10 +60,47 @@ export default function BottomBar() {
         setTimeSignature
       );
       setExportStatus('Imported successfully');
+      // Get fresh state from store after import completes
+      const currentProject = useProjectStore.getState().project;
+      console.log('MIDI clips after import:', currentProject?.midiClips);
       setTimeout(() => setExportStatus(''), 3000);
     } catch (error) {
       console.error('Import error:', error);
       setExportStatus('Import failed');
+      setTimeout(() => setExportStatus(''), 3000);
+    }
+  };
+
+  const handleMp3FileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset input
+    e.target.value = '';
+
+    try {
+      setExportStatus('Converting MP3 to MIDI...');
+      
+      // Convert MP3 to MIDI using the API
+      const midiFile = await convertMp3ToMidi(file);
+      
+      setExportStatus('Importing MIDI...');
+      
+      // Import the converted MIDI file
+      await importMidiFile(
+        midiFile,
+        addTrack,
+        addMidiClip,
+        addArrangementClip,
+        setTempo,
+        setTimeSignature
+      );
+      
+      setExportStatus('Imported successfully');
+      setTimeout(() => setExportStatus(''), 3000);
+    } catch (error) {
+      console.error('MP3 import error:', error);
+      setExportStatus('MP3 import failed');
       setTimeout(() => setExportStatus(''), 3000);
     }
   };
@@ -80,6 +122,19 @@ export default function BottomBar() {
           onChange={handleFileChange}
           className="hidden"
         />
+        <input
+          ref={mp3FileInputRef}
+          type="file"
+          accept=".mp3,.wav,.m4a,.ogg"
+          onChange={handleMp3FileChange}
+          className="hidden"
+        />
+        <button
+          onClick={handleImportMp3}
+          className="px-4 py-1 bg-purple-600 hover:bg-purple-500 rounded text-sm font-medium transition"
+        >
+          Import MP3
+        </button>
         <button
           onClick={handleImportMidi}
           className="px-4 py-1 bg-green-600 hover:bg-green-500 rounded text-sm font-medium transition"

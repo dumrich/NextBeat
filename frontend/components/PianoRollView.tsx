@@ -45,8 +45,6 @@ export default function PianoRollView() {
     addMidiClip,
     updateMidiClip,
     addArrangementClip,
-    undo,
-    canUndo,
   } = useProjectStore();
   const [isDragging, setIsDragging] = useState(false);
   const [lastProcessedCell, setLastProcessedCell] = useState<string | null>(null);
@@ -100,7 +98,7 @@ export default function PianoRollView() {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
-
+      
       // Tool switching shortcuts (only when no modifiers are pressed)
       if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
         if (e.key === 's' || e.key === 'S') {
@@ -120,11 +118,11 @@ export default function PianoRollView() {
         }
       }
 
-      // Undo shortcut
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        undo();
-      }
+      // Undo shortcut (disabled - undo functionality not implemented)
+      // if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+      //   e.preventDefault();
+      //   undo();
+      // }
 
       // Ctrl/Cmd + E: Erase All
       if ((e.metaKey || e.ctrlKey) && (e.key === 'e' || e.key === 'E')) {
@@ -144,7 +142,7 @@ export default function PianoRollView() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, selectedTool, selectedNoteIndices, activeClip, updateMidiClip, setSelectedTool, handleEraseAll]);
+  }, [selectedTool, selectedNoteIndices, activeClip, updateMidiClip, setSelectedTool, handleEraseAll]);
 
   // Ensure we have a clip to work with
   const ensureActiveClip = () => {
@@ -489,8 +487,6 @@ export default function PianoRollView() {
 
   const handleMouseUp = () => {
     if (!isDragging) return;
-
-    console.log('handleMouseUp', dragPosition);
     
     // Handle note drop in select mode - snap to grid and check collisions
     if (selectedTool === 'select' && draggedNoteIndex !== null && activeClip && dragPosition && originalNotePosition) {
@@ -584,14 +580,15 @@ export default function PianoRollView() {
         >
           Erase All
         </button>
-        <button 
+        {/* Undo button disabled - undo functionality not implemented */}
+        {/* <button 
           className="px-3 py-1 rounded text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-100 disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={undo}
           disabled={!canUndo()}
           title="Undo (⌘Z)"
         >
           Undo
-        </button>
+        </button> */}
       </div>
 
       {/* Piano Roll Grid */}

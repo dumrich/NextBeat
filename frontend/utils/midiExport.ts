@@ -3,6 +3,9 @@
 import { Midi } from '@tonejs/midi';
 import type { Project, MidiClip, ArrangementClip } from '@/types/project';
 
+// API base URL for MP3 to MIDI conversion
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 // Constants for MIDI conversion
 const TICKS_PER_QUARTER_NOTE = 480; // Standard MIDI resolution
 const TICKS_PER_BAR = 1920; // 4 beats * 480 ticks (assuming 4/4 time)
@@ -252,4 +255,34 @@ export async function importMidiFile(
     
     reader.readAsArrayBuffer(file);
   });
+}
+
+// Convert MP3 to MIDI using the backend API
+export async function convertMp3ToMidi(file: File): Promise<File> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const response = await fetch(`${API_BASE}/convert`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Conversion failed: ${response.statusText}`);
+    }
+
+    // Get the MIDI file as a blob
+    const midiBlob = await response.blob();
+    
+    // Create a File object from the blob with a .mid extension
+    const midiFile = new File([midiBlob], file.name.replace(/\.(mp3|wav|m4a|ogg)$/i, '.mid'), {
+      type: 'audio/midi',
+    });
+
+    return midiFile;
+  } catch (error) {
+    console.error('MP3 to MIDI conversion error:', error);
+    throw error;
+  }
 }

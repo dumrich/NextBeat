@@ -15,8 +15,6 @@ interface ProjectState {
   metronomeEnabled: boolean;
   snapGrid: string; // e.g., '1/4', '1/8', '1/16', '1/32'
   songLength: number; // number of measures/bars in the song
-  history: Project[];
-  historyIndex: number;
   
   // Actions
   setProject: (project: Project) => void;
@@ -47,10 +45,6 @@ interface ProjectState {
   deleteArrangementClip: (clipId: string) => void;
   setTempo: (tempo: number) => void;
   setTimeSignature: (timeSignature: TimeSignature) => void;
-  undo: () => void;
-  redo: () => void;
-  canUndo: () => boolean;
-  canRedo: () => boolean;
 }
 
 const createDefaultProject = (): Project => ({
@@ -82,8 +76,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   metronomeEnabled: false,
   snapGrid: '1/4',
   songLength: 8,
-  history: [],
-  historyIndex: -1,
   
   setProject: (project) => {
     const firstTrackId = project.tracks.length > 0 ? project.tracks[0].id : null;
@@ -177,21 +169,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   
   updateMidiClip: (clipId, updates) => set((state) => {
     if (!state.project) return state;
-    const newProject = {
-      ...state.project,
-      midiClips: state.project.midiClips.map((c) =>
-        c.id === clipId ? { ...c, ...updates } : c
-      ),
-    };
-    // Add to history
-    const newHistory = state.history.slice(0, state.historyIndex + 1);
-    newHistory.push(state.project);
-    // Keep history limited to 50 states
-    if (newHistory.length > 50) newHistory.shift();
     return {
-      project: newProject,
-      history: newHistory,
-      historyIndex: newHistory.length - 1,
+      project: {
+        ...state.project,
+        midiClips: state.project.midiClips.map((c) =>
+          c.id === clipId ? { ...c, ...updates } : c
+        ),
+      },
     };
   }),
   
@@ -288,30 +272,4 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       project: { ...state.project, timeSignature },
     };
   }),
-  
-  undo: () => set((state) => {
-    if (state.historyIndex <= 0) return state;
-    return {
-      project: state.history[state.historyIndex - 1],
-      historyIndex: state.historyIndex - 1,
-    };
-  }),
-  
-  redo: () => set((state) => {
-    if (state.historyIndex >= state.history.length - 1) return state;
-    return {
-      project: state.history[state.historyIndex + 1],
-      historyIndex: state.historyIndex + 1,
-    };
-  }),
-  
-  canUndo: () => {
-    const state = get();
-    return state.historyIndex > 0;
-  },
-  
-  canRedo: () => {
-    const state = get();
-    return state.historyIndex < state.history.length - 1;
-  },
 }));
