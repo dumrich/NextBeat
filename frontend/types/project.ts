@@ -102,7 +102,7 @@ export type Project = {
 
   export type ViewMode = 'playlist' | 'pianoRoll';
 
-export type Tool = 'select' | 'draw' | 'erase' | 'slice';
+export type Tool = 'select' | 'draw' | 'erase';
 
 export type Selection = {
   clips: string[];

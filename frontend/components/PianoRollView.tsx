@@ -16,8 +16,7 @@ const NOTES = [
 const TOOLS = [
   'select',
   'draw',
-  'erase',
-  'slice',
+  'erase'
 ];
 
 const SNAPGRID_TO_FRACTION: { [key: string]: number } = {
@@ -88,9 +87,40 @@ export default function PianoRollView() {
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in input fields
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // Tool switching shortcuts (only when no modifiers are pressed)
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
+        if (e.key === 's' || e.key === 'S') {
+          e.preventDefault();
+          setSelectedTool('select');
+          return;
+        }
+        if (e.key === 'd' || e.key === 'D') {
+          e.preventDefault();
+          setSelectedTool('draw');
+          return;
+        }
+        if (e.key === 'e' || e.key === 'E') {
+          e.preventDefault();
+          setSelectedTool('erase');
+          return;
+        }
+      }
+
+      // Undo shortcut
       if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
         undo();
+      }
+
+      // Ctrl/Cmd + E: Erase All
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'e' || e.key === 'E')) {
+        e.preventDefault();
+        handleEraseAll();
       }
       
       // Delete selected notes
@@ -105,7 +135,7 @@ export default function PianoRollView() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, selectedTool, selectedNoteIndices, activeClip, updateMidiClip]);
+  }, [undo, selectedTool, selectedNoteIndices, activeClip, updateMidiClip, setSelectedTool, handleEraseAll]);
 
   // Ensure we have a clip to work with
   const ensureActiveClip = () => {
@@ -479,7 +509,7 @@ export default function PianoRollView() {
           }`} 
           onClick={() => setSelectedTool(tool as Tool)}
         >
-          {tool.charAt(0).toUpperCase() + tool.slice(1)}
+          {tool.charAt(0).toUpperCase() + tool.slice(1)} ({tool.charAt(0).toUpperCase()}) 
         </button>
         ))}
         <button 
