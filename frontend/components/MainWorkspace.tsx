@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { useProjectStore } from '@/stores/projectStore';
 import PlaylistView from './PlaylistView';
 import PianoRollView from './PianoRollView';
-import StepSequencerView from './StepSequencerView';
 import TrackBrowserModal from './TrackBrowserModal';
 
 export default function MainWorkspace() {
@@ -17,14 +16,6 @@ export default function MainWorkspace() {
         return <PlaylistView />;
       case 'pianoRoll':
         return <PianoRollView />;
-      case 'stepSequencer':
-        return <StepSequencerView />;
-      case 'automation':
-        return (
-          <div className="h-full bg-black flex items-center justify-center text-zinc-500">
-            Automation Editor (Coming Soon)
-          </div>
-        );
       default:
         return <PlaylistView />;
     }
@@ -37,8 +28,6 @@ export default function MainWorkspace() {
         <div className="h-10 bg-zinc-900 border-b border-zinc-700 flex items-center gap-1 px-2 flex-shrink-0">
           <ViewTab view="playlist" label="Playlist" />
           <ViewTab view="pianoRoll" label="Piano Roll" />
-          <ViewTab view="stepSequencer" label="Step Sequencer" />
-          <ViewTab view="automation" label="Automation" />
           <div className="ml-auto">
             <button
               onClick={() => setIsTrackModalOpen(true)}

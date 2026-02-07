@@ -8,15 +8,11 @@ export default function TransportBar() {
   const {
     project,
     isPlaying,
-    isRecording,
-    metronomeEnabled,
     playheadPosition,
     snapGrid,
     songLength,
     setTempo,
     setIsPlaying,
-    setIsRecording,
-    setMetronomeEnabled,
     setPlayheadPosition,
     setSnapGrid,
     setSongLength,
@@ -29,7 +25,6 @@ export default function TransportBar() {
     if (!isPlaying) {
       await Tone.start();
       if (project) {
-        console.log(project.midiClips);
         Tone.getTransport().bpm.value = project.tempo;
         // Start from current playhead position
         // Convert bars to seconds: (bars * 4 beats/bar) / (bpm / 60)
@@ -108,22 +103,6 @@ export default function TransportBar() {
           className="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 transition"
         >
           ⏮
-        </button>
-        <button
-          onClick={() => setIsRecording(!isRecording)}
-          className={`px-4 py-2 rounded font-bold transition ${
-            isRecording ? 'bg-red-600 hover:bg-red-500' : 'bg-zinc-700 hover:bg-zinc-600'
-          }`}
-        >
-          ⏺
-        </button>
-        <button
-          onClick={() => setMetronomeEnabled(!metronomeEnabled)}
-          className={`px-4 py-2 rounded transition ${
-            metronomeEnabled ? 'bg-blue-600 hover:bg-blue-500' : 'bg-zinc-700 hover:bg-zinc-600'
-          }`}
-        >
-          ♪
         </button>
       </div>
 

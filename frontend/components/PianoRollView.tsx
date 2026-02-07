@@ -3,6 +3,7 @@
 import { useProjectStore } from '@/stores/projectStore';
 import { Tool } from '@/types/project';
 import { useState, useRef, useEffect } from 'react';
+import { useInstruments } from '@/hooks/useInstruments';
 
 const NOTES = [
   'C7', 'B6', 'A#6', 'A6', 'G#6', 'G6', 'F#6', 'F6', 'E6', 'D#6', 'D6', 'C#6', 'C6',
@@ -43,10 +44,10 @@ export default function PianoRollView() {
     updateMidiClip,
     addArrangementClip,
   } = useProjectStore();
-  const [selectedClip, setSelectedClip] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [lastProcessedCell, setLastProcessedCell] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const { playNote } = useInstruments(project?.tracks || []);
 
   if (!project) return null;
 
@@ -60,9 +61,8 @@ export default function PianoRollView() {
         .filter((mc): mc is NonNullable<typeof mc> => mc !== undefined)
     : [];
   
-  const activeClip = selectedClip 
-    ? project.midiClips.find((c) => c.id === selectedClip)
-    : trackMidiClips[0] || null;
+  // Always use the first MIDI clip for the selected track
+  const activeClip = trackMidiClips[0] || null;
 
   const ticksPerBar = 1920;
   const pixelsPerBar = (24 * 4) / SNAPGRID_TO_FRACTION[snapGrid];
@@ -74,10 +74,27 @@ export default function PianoRollView() {
   const ensureActiveClip = () => {
     if (!selectedTrack) return null;
     
-    if (activeClip) return activeClip;
+    // Check if a clip already exists for this track (check store directly to avoid stale closures)
+    const currentState = useProjectStore.getState();
+    const currentProject = currentState.project;
+    if (!currentProject) return null;
+    
+    const existingArrClip = currentProject.arrangementClips.find(
+      (c) => c.trackId === selectedTrack.id && c.clipType === 'midi'
+    );
+    
+    if (existingArrClip) {
+      const existingClip = currentProject.midiClips.find((c) => c.id === existingArrClip.clipDataId);
+      if (existingClip) {
+        return existingClip;
+      }
+    }
     
     // Create a new clip if none exists
-    const newClipId = `clip-${Date.now()}`;
+    // Use timestamp + random to ensure uniqueness
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substr(2, 9);
+    const newClipId = `clip-${timestamp}-${random}`;
     const newClip = {
       id: newClipId,
       trackId: selectedTrack.id,
@@ -89,7 +106,7 @@ export default function PianoRollView() {
     addMidiClip(newClip);
     
     const newArrangementClip = {
-      id: `arr-${Date.now()}`,
+      id: `arr-${timestamp}-${random}`,
       trackId: selectedTrack.id,
       startBar: 0,
       lengthBars: songLength,
@@ -98,7 +115,6 @@ export default function PianoRollView() {
     };
     
     addArrangementClip(newArrangementClip);
-    setSelectedClip(newClipId);
     
     return newClip;
   };
@@ -154,7 +170,26 @@ export default function PianoRollView() {
   };
 
   const handleMouseDown = (noteIndex: number, tick: number) => {
-    if (!selectedTrack || (selectedTool !== 'draw' && selectedTool !== 'erase')) return;
+    if (!selectedTrack || !selectedTrackId) return;
+    
+    // Don't play note preview when erasing
+    if (selectedTool !== 'erase') {
+      // Check if there's already a note at this position
+      const pitch = NOTE_TO_MIDI[NOTES[noteIndex]];
+      const hasExistingNote = activeClip?.notes.some(
+        (n) => n.pitch === pitch && Math.abs(n.startTick - tick) < ticksPerStep / 2
+      );
+      
+      // Only play preview if there's no existing note
+      if (!hasExistingNote) {
+        const noteName = NOTES[noteIndex];
+        const snapGridFraction = SNAPGRID_TO_FRACTION[snapGrid];
+        const duration = `${snapGridFraction}n`; // e.g., "16n" for 1/16
+        playNote(selectedTrackId, noteName, duration);
+      }
+    }
+    
+    if (selectedTool !== 'draw' && selectedTool !== 'erase') return;
     
     setIsDragging(true);
     setLastProcessedCell(null);
@@ -173,7 +208,7 @@ export default function PianoRollView() {
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !gridRef.current || !selectedTrack) return;
+    if (!isDragging || !gridRef.current || !selectedTrack || !selectedTrackId) return;
     if (selectedTool !== 'draw' && selectedTool !== 'erase') return;
 
     const rect = gridRef.current.getBoundingClientRect();
@@ -196,7 +231,21 @@ export default function PianoRollView() {
     if (cellKey !== lastProcessedCell) {
       setLastProcessedCell(cellKey);
 
+      // Play note preview when drawing (not erasing) and only if note doesn't exist
       if (selectedTool === 'draw') {
+        const pitch = NOTE_TO_MIDI[NOTES[noteIndex]];
+        const hasExistingNote = activeClip?.notes.some(
+          (n) => n.pitch === pitch && Math.abs(n.startTick - tick) < ticksPerStep / 2
+        );
+        
+        // Only play preview if there's no existing note
+        if (!hasExistingNote) {
+          const noteName = NOTES[noteIndex];
+          const snapGridFraction = SNAPGRID_TO_FRACTION[snapGrid];
+          const duration = `${snapGridFraction}n`;
+          playNote(selectedTrackId, noteName, duration);
+        }
+        
         addNoteAtPosition(noteIndex, tick);
       } else if (selectedTool === 'erase') {
         removeNoteAtPosition(noteIndex, tick);
@@ -209,20 +258,6 @@ export default function PianoRollView() {
     setLastProcessedCell(null);
   };
 
-  // Update activeClip reference when project updates
-  useEffect(() => {
-    if (selectedClip) {
-      const clip = project.midiClips.find((c) => c.id === selectedClip);
-      if (!clip) setSelectedClip(null);
-    } else if (selectedTrack && trackMidiClips.length > 0) {
-      const firstArrClip = project.arrangementClips.find(
-        (c) => c.trackId === selectedTrack.id && c.clipType === 'midi'
-      );
-      if (firstArrClip) {
-        setSelectedClip(firstArrClip.clipDataId);
-      }
-    }
-  }, [project.midiClips, project.arrangementClips, selectedTrack, selectedClip, trackMidiClips]);
 
   return (
     <div className="h-full bg-black flex flex-col">

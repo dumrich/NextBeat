@@ -100,7 +100,7 @@ export type Project = {
   };
 };
 
-export type ViewMode = 'playlist' | 'pianoRoll' | 'stepSequencer' | 'automation';
+  export type ViewMode = 'playlist' | 'pianoRoll';
 
 export type Tool = 'select' | 'draw' | 'erase' | 'slice';
 
