@@ -1,7 +1,7 @@
 import * as Tone from 'tone';
 import { loadSoundfontInstrument, getSoundfontNameFromProgram, SoundfontInstrument } from './soundfont';
 
-export type InstrumentId = 'piano' | 'synth' | 'bass' | 'guitar' | 'strings' | 'brass' | 'flute' | 'drums' | 'percussion' | 'gunshot' | 'automation';
+export type InstrumentId = 'piano' | 'synth' | 'bass' | 'guitar' | 'strings' | 'brass' | 'french_horn' | 'flute' | 'drums' | 'percussion' | 'gunshot' | 'automation';
 
 // Map InstrumentId to MIDI program numbers (General MIDI)
 const INSTRUMENT_TO_MIDI_PROGRAM: Record<InstrumentId, number> = {
@@ -11,6 +11,7 @@ const INSTRUMENT_TO_MIDI_PROGRAM: Record<InstrumentId, number> = {
   guitar: 24,      // Acoustic Guitar (nylon)
   strings: 48,     // String Ensemble 1
   brass: 56,       // Trumpet
+  french_horn: 60, // French Horn
   flute: 73,       // Flute
   drums: 115,      // Woodblock (sharp percussive click - hi-hat-like)
   percussion: 117, // Melodic Tom (tom drum sounds)
@@ -369,6 +370,7 @@ export function getInstrumentName(instrumentId: InstrumentId | string | null): s
     guitar: 'Nylon Guitar',
     strings: 'String Ensemble',
     brass: 'Trumpet',
+    french_horn: 'French Horn',
     flute: 'Flute',
     drums: 'Woodblock',
     percussion: 'Melodic Toms',

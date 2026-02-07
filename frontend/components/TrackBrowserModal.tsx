@@ -20,6 +20,8 @@ const AVAILABLE_TRACKS: AvailableTrack[] = [
   { id: 'guitar', name: 'Guitar', type: 'instrument', color: '#f59e0b', description: 'Electric guitar' },
   { id: 'strings', name: 'Strings', type: 'instrument', color: '#ec4899', description: 'String ensemble' },
   { id: 'brass', name: 'Brass', type: 'instrument', color: '#f97316', description: 'Brass section' },
+  { id: 'french_horn', name: 'French Horn', type: 'instrument', color: '#d97706', description: 'French horn' },
+  { id: 'flute', name: 'Flute', type: 'instrument', color: '#06b6d4', description: 'Flute' },
   { id: 'drums', name: 'Drum Kit', type: 'drums', color: '#ef4444', description: 'Drum machine' },
   { id: 'percussion', name: 'Percussion', type: 'drums', color: '#dc2626', description: 'Percussion instruments' },
   { id: 'automation', name: 'Automation', type: 'automation', color: '#6b7280', description: 'Automation lane' },

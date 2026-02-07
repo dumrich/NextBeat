@@ -13,6 +13,7 @@ const INSTRUMENT_OPTIONS: { id: InstrumentId; label: string }[] = [
   { id: 'guitar', label: 'Nylon Guitar' },
   { id: 'strings', label: 'String Ensemble' },
   { id: 'brass', label: 'Trumpet' },
+  { id: 'french_horn', label: 'French Horn' },
   { id: 'flute', label: 'Flute' },
   { id: 'drums', label: 'Woodblock' },
   { id: 'percussion', label: 'Melodic Toms' },
