@@ -79,8 +79,16 @@ export function usePlayback(
         ? synth as SoundfontInstrument
         : synth as Tone.PolySynth | Tone.MonoSynth | Tone.Synth | Tone.FMSynth | Tone.AMSynth | Tone.DuoSynth | Tone.PluckSynth | Tone.MembraneSynth | Tone.MetalSynth;
 
-      // Store base track volume - we'll combine this with note velocity per note
+      // Store base track volume
       const baseTrackVolume = track.volume;
+      
+      // Set track volume once for Tone.js synths (not per-note)
+      // This prevents volume changes from affecting currently playing notes
+      if (!isSoundfont) {
+        const toneSynth = playable as Tone.PolySynth | Tone.MonoSynth | Tone.Synth | Tone.FMSynth | Tone.AMSynth | Tone.DuoSynth | Tone.PluckSynth | Tone.MembraneSynth | Tone.MetalSynth;
+        const trackVolumeDb = Tone.gainToDb(baseTrackVolume);
+        toneSynth.volume.value = trackVolumeDb;
+      }
 
       // Collect all notes from all clips on this track
       const allNotes: Array<{ note: MidiNote, clipStartBars: number }> = [];
@@ -182,17 +190,15 @@ export function usePlayback(
             // All notes have the same velocity and duration
             const noteVelocity = notesAtTime[0].velocity;
             const noteDurationBars = ticksToBars(notesAtTime[0].durationTick);
+            // Apply tempo scaling to duration to match tempo-scaled scheduling
+            const tempoScaledDuration = noteDurationBars / (tempo / 240);
             
-            // Combine note velocity (0-127) with track volume (0-1)
-            // Final gain = (note.velocity / 127) * track.volume
-            const combinedGain = (noteVelocity / 127) * baseTrackVolume;
-            const velocityDb = Tone.gainToDb(combinedGain);
+            // Convert MIDI velocity (0-127) to normalized velocity (0-1)
+            const normalizedVelocity = noteVelocity / 127;
             
             const event = new Tone.ToneEvent((time) => {
-              // Set volume for this chord based on combined velocity
-              // Note: This affects all voices, but since all notes in chord have same velocity, it's OK
-              toneSynth.volume.value = velocityDb;
-              toneSynth.triggerAttackRelease(noteNames, noteDurationBars, time);
+              // Use velocity parameter to set per-note volume without affecting other voices
+              toneSynth.triggerAttackRelease(noteNames, tempoScaledDuration, time, normalizedVelocity);
             });
             
             event.start(adjustedStartBars);
@@ -202,18 +208,15 @@ export function usePlayback(
             notesAtTime.forEach((note) => {
               const noteName = midiToNoteName(note.pitch);
               const noteDurationBars = ticksToBars(note.durationTick);
+              // Apply tempo scaling to duration to match tempo-scaled scheduling
+              const tempoScaledDuration = noteDurationBars / (tempo / 240);
               
-              // Combine note velocity (0-127) with track volume (0-1)
-              // Final gain = (note.velocity / 127) * track.volume
-              const combinedGain = (note.velocity / 127) * baseTrackVolume;
-              const velocityDb = Tone.gainToDb(combinedGain);
+              // Convert MIDI velocity (0-127) to normalized velocity (0-1)
+              const normalizedVelocity = note.velocity / 127;
               
               const event = new Tone.ToneEvent((time) => {
-                // Set volume for this specific note based on its velocity
-                // Note: For PolySynth, this affects all voices, so chords with different velocities
-                // will be played individually (handled above)
-                toneSynth.volume.value = velocityDb;
-                toneSynth.triggerAttackRelease(noteName, noteDurationBars, time);
+                // Use velocity parameter to set per-note volume without affecting other voices
+                toneSynth.triggerAttackRelease(noteName, tempoScaledDuration, time, normalizedVelocity);
               });
               
               event.start(adjustedStartBars);
