@@ -114,6 +114,7 @@ export function createToneInstrument(instrumentId: InstrumentId): Tone.ToneAudio
       // Piano-like sound using FMSynth with bell-like characteristics
       // Wrap in PolySynth for polyphonic playback (chords)
       return new Tone.PolySynth(Tone.FMSynth, {
+        maxPolyphony: 64, // Increase polyphony for overlapping sustained notes
         harmonicity: 3,
         modulationIndex: 10,
         detune: 0,
@@ -141,6 +142,7 @@ export function createToneInstrument(instrumentId: InstrumentId): Tone.ToneAudio
       // Classic synthesizer sound
       // Wrap in PolySynth for polyphonic playback (chords)
       return new Tone.PolySynth(Tone.Synth, {
+        maxPolyphony: 64, // Increase polyphony for overlapping sustained notes
         oscillator: {
           type: 'sawtooth',
         },
@@ -156,6 +158,7 @@ export function createToneInstrument(instrumentId: InstrumentId): Tone.ToneAudio
       // Bass sound using MonoSynth
       // Wrap in PolySynth for polyphonic playback (chords)
       return new Tone.PolySynth(Tone.MonoSynth, {
+        maxPolyphony: 64, // Increase polyphony for overlapping sustained notes
         oscillator: {
           type: 'sawtooth',
         },
@@ -179,6 +182,7 @@ export function createToneInstrument(instrumentId: InstrumentId): Tone.ToneAudio
       // Guitar-like plucked sound
       // PluckSynth is already polyphonic, but wrap in PolySynth for consistency
       return new Tone.PolySynth(Tone.PluckSynth, {
+        maxPolyphony: 64, // Increase polyphony for overlapping sustained notes
         attackNoise: 1,
         dampening: 4000,
         resonance: 0.7,
@@ -235,6 +239,7 @@ export function createToneInstrument(instrumentId: InstrumentId): Tone.ToneAudio
       // Brass section using AMSynth
       // Wrap in PolySynth for polyphonic playback (chords)
       return new Tone.PolySynth(Tone.AMSynth, {
+        maxPolyphony: 64, // Increase polyphony for overlapping sustained notes
         harmonicity: 3,
         detune: 0,
         oscillator: {
@@ -294,6 +299,7 @@ export function createToneInstrument(instrumentId: InstrumentId): Tone.ToneAudio
       // Automation tracks don't need sound, but we'll provide a simple synth
       // Wrap in PolySynth for polyphonic playback
       return new Tone.PolySynth(Tone.Synth, {
+        maxPolyphony: 64, // Increase polyphony for overlapping sustained notes
         oscillator: {
           type: 'sine',
         },
@@ -307,7 +313,9 @@ export function createToneInstrument(instrumentId: InstrumentId): Tone.ToneAudio
 
     default:
       // Default to basic synth wrapped in PolySynth
-      return new Tone.PolySynth(Tone.Synth).toDestination();
+      return new Tone.PolySynth(Tone.Synth, {
+        maxPolyphony: 64 // Increase polyphony for overlapping sustained notes
+      }).toDestination();
   }
 }
 

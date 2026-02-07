@@ -36,6 +36,7 @@ interface ProjectState {
   deleteTrack: (trackId: string) => void;
   addMidiClip: (clip: MidiClip) => void;
   updateMidiClip: (clipId: string, updates: Partial<MidiClip>) => void;
+  updateMidiClipNoHistory: (clipId: string, updates: Partial<MidiClip>) => void;
   deleteMidiClip: (clipId: string) => void;
   addPattern: (pattern: Pattern) => void;
   updatePattern: (patternId: string, updates: Partial<Pattern>) => void;
@@ -45,6 +46,11 @@ interface ProjectState {
   deleteArrangementClip: (clipId: string) => void;
   setTempo: (tempo: number) => void;
   setTimeSignature: (timeSignature: TimeSignature) => void;
+  saveHistorySnapshot: () => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
 }
 
 const createDefaultProject = (): Project => ({
@@ -179,6 +185,40 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     };
   }),
   
+  updateMidiClipNoHistory: (clipId, updates) => set((state) => {
+    if (!state.project) return state;
+    const newProject = {
+      ...state.project,
+      midiClips: state.project.midiClips.map((c) =>
+        c.id === clipId ? { ...c, ...updates } : c
+      ),
+    };
+    // Add to history
+    const newHistory = state.history.slice(0, state.historyIndex + 1);
+    newHistory.push(state.project);
+    // Keep history limited to 50 states
+    if (newHistory.length > 50) newHistory.shift();
+    return {
+      project: newProject,
+      history: newHistory,
+      historyIndex: newHistory.length - 1,
+    };
+  }),
+  
+  updateMidiClipNoHistory: (clipId, updates) => set((state) => {
+    if (!state.project) return state;
+    const newProject = {
+      ...state.project,
+      midiClips: state.project.midiClips.map((c) =>
+        c.id === clipId ? { ...c, ...updates } : c
+      ),
+    };
+    // Update without adding to history
+    return {
+      project: newProject,
+    };
+  }),
+  
   deleteMidiClip: (clipId) => set((state) => {
     if (!state.project) return state;
     return {
@@ -272,4 +312,43 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       project: { ...state.project, timeSignature },
     };
   }),
+  
+  saveHistorySnapshot: () => set((state) => {
+    if (!state.project) return state;
+    // Save current state to history before making changes
+    const newHistory = state.history.slice(0, state.historyIndex + 1);
+    newHistory.push(state.project);
+    // Keep history limited to 50 states
+    if (newHistory.length > 50) newHistory.shift();
+    return {
+      history: newHistory,
+      historyIndex: newHistory.length - 1,
+    };
+  }),
+  
+  undo: () => set((state) => {
+    if (state.historyIndex <= 0) return state;
+    return {
+      project: state.history[state.historyIndex - 1],
+      historyIndex: state.historyIndex - 1,
+    };
+  }),
+  
+  redo: () => set((state) => {
+    if (state.historyIndex >= state.history.length - 1) return state;
+    return {
+      project: state.history[state.historyIndex + 1],
+      historyIndex: state.historyIndex + 1,
+    };
+  }),
+  
+  canUndo: () => {
+    const state = get();
+    return state.historyIndex > 0;
+  },
+  
+  canRedo: () => {
+    const state = get();
+    return state.historyIndex < state.history.length - 1;
+  },
 }));

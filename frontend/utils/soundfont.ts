@@ -55,7 +55,7 @@ export class SoundfontInstrument {
   private soundfontPlayer: any; // soundfont-player Player object
   private gainNode: GainNode;
   private volume: number = 1.0; // Default to full volume (was 0.5, too quiet)
-  private activeNoteIds: Set<string> = new Set(); // Track active note IDs
+  private activeNotes: Map<number, any> = new Map(); // Track active note audio nodes by unique ID
 
   constructor(audioContext: AudioContext, soundfontPlayer: any) {
     this.audioContext = audioContext;
@@ -111,19 +111,23 @@ export class SoundfontInstrument {
       const velocityGain = (velocity / 127) * 2.0;
       const finalGain = velocityGain * this.volume;
       
+      // Generate unique ID for this note instance
+      const noteId = Date.now() + Math.random();
+      
       // Use the soundfont player's start() method
       // Try both note name and MIDI note number
       if (this.soundfontPlayer.start) {
+        let audioNode = null;
         try {
-          // Try with note name first
-          this.soundfontPlayer.start(noteName, startTime, {
+          // Try with note name first - capture the returned audio node
+          audioNode = this.soundfontPlayer.start(noteName, startTime, {
             gain: finalGain,
             duration: durationSeconds
           });
         } catch (error) {
           // Try with MIDI note number if note name fails
           try {
-            this.soundfontPlayer.start(midiNote, startTime, {
+            audioNode = this.soundfontPlayer.start(midiNote, startTime, {
               gain: finalGain,
               duration: durationSeconds
             });
@@ -132,29 +136,68 @@ export class SoundfontInstrument {
           }
         }
         
-        // Stop the note after duration using the player's stop method
-        if (this.soundfontPlayer.stop) {
+        // Store the audio node for this specific note
+        if (audioNode) {
+          this.activeNotes.set(noteId, audioNode);
+          
+          // Stop only this specific note after duration
           const stopTime = startTime + durationSeconds;
-          // Use setTimeout to stop the note
           const timeoutMs = Math.max(0, (stopTime - this.audioContext.currentTime) * 1000);
           setTimeout(() => {
             try {
-              // Stop all notes (or we could track specific note IDs)
-              this.soundfontPlayer.stop(this.audioContext.currentTime);
+              // Stop only this specific note using its audio node
+              const node = this.activeNotes.get(noteId);
+              if (node) {
+                // If the audio node has a stop method, use it
+                if (node.stop && typeof node.stop === 'function') {
+                  node.stop(this.audioContext.currentTime);
+                }
+                // If it has a disconnect method, disconnect it
+                else if (node.disconnect && typeof node.disconnect === 'function') {
+                  node.disconnect();
+                }
+                // Remove from active notes
+                this.activeNotes.delete(noteId);
+              }
             } catch (e) {
-              // Error stopping note
+              // Error stopping note - clean up anyway
+              this.activeNotes.delete(noteId);
             }
           }, timeoutMs);
         }
       } else if (this.soundfontPlayer.play) {
         // Fallback to play() method if start() doesn't exist
+        let audioNode = null;
         try {
-          this.soundfontPlayer.play(noteName, startTime, {
+          audioNode = this.soundfontPlayer.play(noteName, startTime, {
             gain: finalGain,
             duration: durationSeconds
           });
         } catch (error) {
           // Error calling play()
+        }
+        
+        // Store and handle audio node cleanup for play() method as well
+        if (audioNode) {
+          this.activeNotes.set(noteId, audioNode);
+          
+          const stopTime = startTime + durationSeconds;
+          const timeoutMs = Math.max(0, (stopTime - this.audioContext.currentTime) * 1000);
+          setTimeout(() => {
+            try {
+              const node = this.activeNotes.get(noteId);
+              if (node) {
+                if (node.stop && typeof node.stop === 'function') {
+                  node.stop(this.audioContext.currentTime);
+                } else if (node.disconnect && typeof node.disconnect === 'function') {
+                  node.disconnect();
+                }
+                this.activeNotes.delete(noteId);
+              }
+            } catch (e) {
+              this.activeNotes.delete(noteId);
+            }
+          }, timeoutMs);
         }
       }
     } catch (error) {
@@ -184,15 +227,21 @@ export class SoundfontInstrument {
 
   // Stop all active notes
   releaseAll(): void {
-    if (this.soundfontPlayer && this.soundfontPlayer.stop) {
+    // Stop each active note individually
+    this.activeNotes.forEach((audioNode, noteId) => {
       try {
-        // Stop all notes immediately
-        this.soundfontPlayer.stop(this.audioContext.currentTime);
+        if (audioNode) {
+          if (audioNode.stop && typeof audioNode.stop === 'function') {
+            audioNode.stop(this.audioContext.currentTime);
+          } else if (audioNode.disconnect && typeof audioNode.disconnect === 'function') {
+            audioNode.disconnect();
+          }
+        }
       } catch (e) {
         // Ignore errors
       }
-    }
-    this.activeNoteIds.clear();
+    });
+    this.activeNotes.clear();
   }
 
   // Dispose of the instrument
