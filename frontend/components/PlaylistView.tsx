@@ -6,7 +6,7 @@ import { Settings } from 'lucide-react';
 import TrackSettingsModal from './TrackSettingsMenu';
 
 export default function PlaylistView() {
-  const { project, playheadPosition, updateTrack, selectedTrackId, setSelectedTrackId } = useProjectStore();
+  const { project, playheadPosition, isPlaying, updateTrack, selectedTrackId, setSelectedTrackId } = useProjectStore();
   const [zoom, setZoom] = useState(1);
   const [scrollX, setScrollX] = useState(0);
   const [settingsTrackId, setSettingsTrackId] = useState<string | null>(null);
@@ -25,9 +25,9 @@ export default function PlaylistView() {
   };
 
   return (
-    <div className="h-full bg-black flex flex-col">
+    <div className="h-full bg-black flex flex-col relative">
       {/* Timeline Header */}
-      <div className="h-12 bg-zinc-900 border-b border-zinc-700 flex items-center flex-shrink-0">
+      <div className="h-12 bg-zinc-900 border-b border-zinc-700 flex items-center flex-shrink-0 relative z-10">
         <div className="w-48 border-r border-zinc-700 px-4 text-sm text-zinc-400">Timeline</div>
         <div className="flex-1 relative overflow-hidden">
           <div
@@ -45,17 +45,21 @@ export default function PlaylistView() {
                 <span className="absolute top-1 left-1 text-xs text-zinc-500">{i + 1}</span>
               </div>
             ))}
-            {/* Playhead */}
-            <div
-              className="absolute top-0 bottom-0 w-0.5 bg-white z-10"
-              style={{ left: `${barsToPixels(playheadPosition)}px` }}
-            />
           </div>
         </div>
       </div>
 
       {/* Tracks */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto relative">
+        {/* Playhead - spans entire tracks area, starts at the border (48px) where track content begins */}
+        {isPlaying && (
+          <div
+            className="absolute top-0 bottom-0 w-0.5 bg-white z-20 pointer-events-none"
+            style={{
+              left: `${192 + barsToPixels(playheadPosition) - scrollX}px`,
+            }}
+          />
+        )}
         {project.tracks.map((track) => {
           const trackClips = project.arrangementClips.filter((c) => c.trackId === track.id);
           return (

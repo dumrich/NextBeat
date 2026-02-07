@@ -39,6 +39,8 @@ export default function PianoRollView() {
     setSelectedTool, 
     snapGrid, 
     songLength,
+    playheadPosition,
+    isPlaying,
     addMidiClip,
     updateMidiClip,
     addArrangementClip,
@@ -560,6 +562,16 @@ export default function PianoRollView() {
 
           {/* Note Grid */}
           <div className="flex-1 relative" style={{ height: totalNotesHeight }}>
+            {/* Playhead - vertical white line */}
+            {isPlaying && (
+              <div
+                className="absolute top-0 bottom-0 w-0.5 bg-white z-30 pointer-events-none"
+                style={{
+                  left: `${playheadPosition * pixelsPerBar * SNAPGRID_TO_FRACTION[snapGrid]}px`,
+                }}
+              />
+            )}
+
             {/* Grid Lines */}
             {Array.from({ length: songLength * SNAPGRID_TO_FRACTION[snapGrid] }, (_, i) => (
               <div
