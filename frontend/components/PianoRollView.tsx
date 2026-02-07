@@ -46,7 +46,9 @@ export default function PianoRollView() {
     isPlaying,
     addMidiClip,
     updateMidiClip,
+    updateMidiClipNoHistory,
     addArrangementClip,
+    saveHistorySnapshot,
     undo,
     canUndo,
   } = useProjectStore();
@@ -203,7 +205,7 @@ export default function PianoRollView() {
   };
 
   // Add note at a specific position
-  const addNoteAtPosition = (noteIndex: number, tick: number, duration?: number) => {
+  const addNoteAtPosition = (noteIndex: number, tick: number, duration?: number, addToHistory: boolean = true) => {
     const clip = ensureActiveClip();
     if (!clip) return null;
 
@@ -224,9 +226,16 @@ export default function PianoRollView() {
         channel: 0,
       };
       
-      updateMidiClip(clip.id, {
-        notes: [...clip.notes, newNote],
-      });
+      // Use appropriate update method based on whether to add to history
+      if (addToHistory) {
+        updateMidiClip(clip.id, {
+          notes: [...clip.notes, newNote],
+        });
+      } else {
+        updateMidiClipNoHistory(clip.id, {
+          notes: [...clip.notes, newNote],
+        });
+      }
       
       // Return the index where the note will be added
       return clip.notes.length;
@@ -365,9 +374,12 @@ export default function PianoRollView() {
     setLastProcessedCell(cellKey);
 
     if (selectedTool === 'draw') {
-      // Create a sustained note (full grid step duration)
+      // Save history snapshot before creating note
+      saveHistorySnapshot();
+      
+      // Create a sustained note (full grid step duration) without adding to history
       const sustainedDuration = ticksPerStep;
-      const newNoteIndex = addNoteAtPosition(noteIndex, tick, sustainedDuration);
+      const newNoteIndex = addNoteAtPosition(noteIndex, tick, sustainedDuration, false);
       
       // Start tracking for potential extended sustained note creation
       if (newNoteIndex !== null) {
@@ -399,14 +411,14 @@ export default function PianoRollView() {
       const minDuration = ticksPerStep;
       newDuration = Math.max(minDuration, newDuration);
       
-      // Update the note's duration
+      // Update the note's duration without adding to history (live drag)
       const updatedNotes = [...activeClip.notes];
       if (updatedNotes[sustainedNoteIndex]) {
         updatedNotes[sustainedNoteIndex] = {
           ...updatedNotes[sustainedNoteIndex],
           durationTick: newDuration,
         };
-        updateMidiClip(activeClip.id, { notes: updatedNotes });
+        updateMidiClipNoHistory(activeClip.id, { notes: updatedNotes });
       }
       
       return;
@@ -529,6 +541,12 @@ export default function PianoRollView() {
         };
         updateMidiClip(activeClip.id, { notes: updatedNotes });
       }
+    }
+    
+    // Finalize sustained note creation - no need to add to history, already saved on mouse down
+    if (isCreatingSustainedNote && activeClip) {
+      // The final state is already in the project, and history was saved before creation
+      // No additional action needed
     }
     
     // Reset all dragging and sustained note states
