@@ -111,14 +111,28 @@ export function usePlayback(
       // Sort start times to ensure strictly increasing order
       const sortedStartTimes = Array.from(notesByStartTime.keys()).sort((a, b) => a - b);
 
+      // Get current transport time in bars to ensure we don't schedule notes in the past
+      const currentTransportBars = Tone.getTransport().seconds > 0 
+        ? (Tone.getTransport().seconds / 60) * (tempo / 4)
+        : 0;
+      
+      // Add a small safety margin to ensure notes are scheduled in the future
+      // This prevents notes at time 0 from being missed if transport has already started
+      const safetyMargin = 0.001; // 1ms worth of bars at typical tempo
+      const minStartBars = Math.max(0, currentTransportBars + safetyMargin);
+      
       // Schedule notes, ensuring strictly increasing start times
       let lastStartBars = -Infinity;
       
       sortedStartTimes.forEach((startBars) => {
         const notesAtTime = notesByStartTime.get(startBars)!;
         
-        // Ensure start time is strictly greater than previous
-        const adjustedStartBars = Math.max(startBars, lastStartBars + 0.00001);
+        // Ensure start time is strictly greater than previous AND not in the past
+        // For notes at time 0 or very close, ensure they're at least at minStartBars
+        const adjustedStartBars = Math.max(
+          Math.max(startBars, minStartBars),
+          lastStartBars + 0.00001
+        );
         
         // For PolySynth, we can play multiple notes (chords) at once
         if (playable instanceof Tone.PolySynth && notesAtTime.length > 1) {
@@ -188,10 +202,11 @@ export function usePlayback(
   useEffect(() => {
     if (isPlaying && project) {
       Tone.getTransport().bpm.value = tempo;
-      // Small delay to ensure Transport is ready
+      // Schedule notes immediately (before or right as transport starts)
+      // Use a very small delay to ensure Transport context is ready
       const timeout = setTimeout(() => {
         scheduleNotes();
-      }, 10);
+      }, 1);
       return () => clearTimeout(timeout);
     } else {
       // Clear scheduled events when stopped
