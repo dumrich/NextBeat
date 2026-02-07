@@ -1,9 +1,21 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Trash2, Volume2, Palette, Edit, Copy } from 'lucide-react';
+import { Trash2, Volume2, Palette, Edit, Copy, Music } from 'lucide-react';
 import { useProjectStore } from '@/stores/projectStore';
+import { getInstrumentName, type InstrumentId } from '@/utils/instruments';
 import type { Track } from '@/types/project';
+
+const INSTRUMENT_OPTIONS: { id: InstrumentId; label: string }[] = [
+  { id: 'piano', label: 'Piano' },
+  { id: 'synth', label: 'Synthesizer' },
+  { id: 'bass', label: 'Bass' },
+  { id: 'guitar', label: 'Guitar' },
+  { id: 'strings', label: 'Strings' },
+  { id: 'brass', label: 'Brass' },
+  { id: 'drums', label: 'Drum Kit' },
+  { id: 'percussion', label: 'Percussion' },
+];
 
 interface TrackSettingsModalProps {
   isOpen: boolean;
@@ -88,6 +100,28 @@ export default function TrackSettingsModal({ isOpen, track, onClose }: TrackSett
               style={{ backgroundColor: track.color }}
             />
             <span className="text-lg font-medium text-white">{track.name}</span>
+          </div>
+
+          {/* Instrument */}
+          <div>
+            <label className="flex items-center gap-2 mb-2 text-sm text-zinc-300">
+              <Music className="w-4 h-4" />
+              Instrument
+            </label>
+            <select
+              value={track.instrument || 'piano'}
+              onChange={(e) => {
+                const id = e.target.value as InstrumentId;
+                updateTrack(track.id, { instrument: id, midiProgram: undefined });
+              }}
+              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white text-sm"
+            >
+              {INSTRUMENT_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Rename Section */}

@@ -3,17 +3,31 @@
 import { useState } from 'react';
 import { useProjectStore } from '@/stores/projectStore';
 import { agentClient, type ProposedEdit } from '@/utils/agentClient';
+import { generateMidiFromPrompt } from '@/utils/midiGenerateClient';
+import { importMidiFromBlob } from '@/utils/midiExport';
 
-type AgentMode = 'chat' | 'actions' | 'autocomplete';
+type AgentMode = 'chat' | 'generate' | 'actions' | 'autocomplete';
+
+const GENERATE_QUICK_PROMPTS = [
+  'A fast techno beat',
+  'A chill lo-fi hip hop groove',
+  'A simple piano melody',
+  'An upbeat drum and bass pattern',
+];
 
 export default function AgentPanel() {
   const { project } = useProjectStore();
-  const [mode, setMode] = useState<AgentMode>('chat');
+  const [mode, setMode] = useState<AgentMode>('generate');
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; edits?: ProposedEdit[] }>>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [pendingEdits, setPendingEdits] = useState<ProposedEdit[]>([]);
   const [suggestions, setSuggestions] = useState<any[]>([]);
+
+  // Generate Music state
+  const [generatePrompt, setGeneratePrompt] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateStatus, setGenerateStatus] = useState<string | null>(null);
 
   const quickPrompts = [
     'Add drums',
@@ -124,6 +138,36 @@ export default function AgentPanel() {
     setPendingEdits((prev) => prev.filter((e) => e !== edit));
   };
 
+  const handleGenerateMusic = async () => {
+    if (!generatePrompt.trim() || !project || isGenerating) return;
+
+    setIsGenerating(true);
+    setGenerateStatus(null);
+
+    try {
+      const blob = await generateMidiFromPrompt(generatePrompt.trim());
+
+      const { addTrack, addMidiClip, addArrangementClip, setTempo, setTimeSignature } =
+        useProjectStore.getState();
+
+      await importMidiFromBlob(blob, {
+        addTrack,
+        addMidiClip,
+        addArrangementClip,
+        setTempo,
+        setTimeSignature,
+      });
+
+      setGenerateStatus('Generated successfully! Added to project.');
+      setTimeout(() => setGenerateStatus(null), 4000);
+    } catch (error) {
+      console.error('Generate error:', error);
+      setGenerateStatus(error instanceof Error ? error.message : 'Generation failed');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <div className="h-full bg-zinc-900 border-l border-zinc-700 flex flex-col">
       {/* Header */}
@@ -133,7 +177,7 @@ export default function AgentPanel() {
           <div className="w-2 h-2 bg-green-500 rounded-full" />
         </div>
         <div className="flex gap-2">
-          {(['chat', 'actions', 'autocomplete'] as AgentMode[]).map((m) => (
+          {(['generate', 'chat', 'actions', 'autocomplete'] as AgentMode[]).map((m) => (
             <button
               key={m}
               onClick={() => setMode(m)}
@@ -151,6 +195,59 @@ export default function AgentPanel() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-4">
+        {mode === 'generate' && (
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-sm font-medium text-zinc-300 mb-2">Generate Music</h3>
+              <p className="text-xs text-zinc-500 mb-3">
+                Describe the music you want. The AI will generate MIDI and add it to your project.
+              </p>
+              <div className="flex flex-wrap gap-2 mb-3">
+                {GENERATE_QUICK_PROMPTS.map((prompt) => (
+                  <button
+                    key={prompt}
+                    onClick={() => setGeneratePrompt(prompt)}
+                    className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-xs text-zinc-300"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={generatePrompt}
+                  onChange={(e) => setGeneratePrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleGenerateMusic();
+                  }}
+                  placeholder="e.g. A fast techno beat"
+                  className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white text-sm"
+                  disabled={isGenerating}
+                />
+                <button
+                  onClick={handleGenerateMusic}
+                  disabled={!generatePrompt.trim() || isGenerating}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 rounded text-sm font-medium shrink-0"
+                >
+                  {isGenerating ? 'Generating...' : 'Generate'}
+                </button>
+              </div>
+              {generateStatus && (
+                <div
+                  className={`mt-2 text-xs ${
+                    generateStatus.includes('success')
+                      ? 'text-green-400'
+                      : 'text-red-400'
+                  }`}
+                >
+                  {generateStatus}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {mode === 'chat' && (
           <div className="space-y-4">
             {messages.map((msg, index) => (
@@ -238,7 +335,8 @@ export default function AgentPanel() {
         )}
       </div>
 
-      {/* Input */}
+      {/* Input - only for chat mode */}
+      {mode === 'chat' && (
       <div className="p-4 border-t border-zinc-700 flex-shrink-0">
         <div className="flex flex-wrap gap-2 mb-2">
           {quickPrompts.map((prompt) => (
@@ -274,6 +372,7 @@ export default function AgentPanel() {
           </button>
         </div>
       </div>
+      )}
     </div>
   );
 }

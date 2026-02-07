@@ -1,5 +1,32 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Text-to-MIDI Server
+
+The Generate Music feature needs the Text-to-MIDI API running. Two options:
+
+### Option A: SSH tunnel (recommended when firewall blocks port 8000)
+```bash
+ssh -L 8000:localhost:8000 ubuntu@150.136.165.122
+```
+Keep this running, then start the API on the server. The frontend uses `http://localhost:8000/generate` by default.
+
+### Option B: Direct access (when firewall allows port 8000)
+Set `NEXT_PUBLIC_TEXT_TO_MIDI_URL=http://150.136.165.122:8000/generate` in `.env.local`.
+
+### CORS
+**You must enable CORS** on the Text-to-MIDI server. FastAPI example:
+```python
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Add your frontend URL
+    allow_methods=["POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
+```
+
+
 ## Getting Started
 
 First, run the development server:

@@ -2,6 +2,7 @@
 
 import { Midi } from '@tonejs/midi';
 import type { Project, MidiClip, ArrangementClip } from '@/types/project';
+import type { InstrumentId } from '@/utils/instruments';
 
 // API base URL for MP3 to MIDI conversion
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -92,6 +93,209 @@ export function downloadMidi(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+// Instrument mapping: map MIDI track metadata to app instruments (piano, guitar, drums, etc.)
+// Always use InstrumentId so playback uses known synths/SoundFonts that work
+type MidiNoteForMapping = { pitch: number };
+
+// Map MIDI program (0-127) to our InstrumentId for imported tracks
+function programToInstrumentId(program: number): InstrumentId {
+  if (program === 9) return 'drums'; // GM channel 10 = drums
+  if (program >= 112 && program <= 119) return 'percussion';
+  if (program >= 0 && program <= 15) return 'piano';   // pianos, chromatic perc
+  if (program >= 16 && program <= 23) return 'synth'; // organs
+  if (program >= 24 && program <= 31) return 'guitar';
+  if (program >= 32 && program <= 39) return 'bass';
+  if (program >= 40 && program <= 47) return 'strings';
+  if (program >= 48 && program <= 55) return 'strings'; // ensemble
+  if (program >= 56 && program <= 63) return 'brass';
+  if (program >= 64 && program <= 71) return 'brass';  // reed
+  if (program >= 72 && program <= 79) return 'strings'; // pipe
+  if (program >= 80 && program <= 95) return 'synth';  // synth lead/pad
+  if (program >= 96 && program <= 103) return 'synth'; // fx
+  if (program >= 104 && program <= 111) return 'guitar'; // ethnic
+  return 'piano';
+}
+
+function suggestInstrument(
+  trackName: string,
+  channelIndex: number,
+  notes: MidiNoteForMapping[],
+  midiProgram: number | null
+): InstrumentId {
+  const lowerName = trackName.toLowerCase();
+  // GM Channel 10 (0-indexed: 9) is percussion
+  if (channelIndex === 9 || lowerName.includes('drum') || lowerName.includes('kick') || lowerName.includes('perc')) {
+    return 'drums';
+  }
+  if (lowerName.includes('bass')) return 'bass';
+  if (lowerName.includes('synth')) return 'synth';
+  if (lowerName.includes('piano')) return 'piano';
+  if (lowerName.includes('guitar')) return 'guitar';
+  if (lowerName.includes('string')) return 'strings';
+  if (lowerName.includes('brass')) return 'brass';
+  if (lowerName.includes('hat') || lowerName.includes('cymbal')) return 'percussion';
+
+  // Use MIDI program from file when available
+  if (midiProgram !== null && midiProgram >= 0 && midiProgram <= 127) {
+    return programToInstrumentId(midiProgram);
+  }
+
+  // Pitch-based heuristics
+  if (notes.length > 0) {
+    const avgPitch = notes.reduce((s, n) => s + n.pitch, 0) / notes.length;
+    if (avgPitch < 45) return 'bass';
+    if (avgPitch > 72) return 'strings';
+  }
+
+  return 'piano';
+}
+
+// Shared import logic: parses MIDI ArrayBuffer and adds to project
+export type MidiImportMutators = {
+  addTrack: (track: any) => void;
+  addMidiClip: (clip: any) => void;
+  addArrangementClip: (clip: any) => void;
+  setTempo: (tempo: number) => void;
+  setTimeSignature: (ts: { numerator: number; denominator: number }) => void;
+};
+
+function isMidiArrayBuffer(buffer: ArrayBuffer): boolean {
+  if (buffer.byteLength < 4) return false;
+  const bytes = new Uint8Array(buffer);
+  return bytes[0] === 0x4d && bytes[1] === 0x54 && bytes[2] === 0x68 && bytes[3] === 0x64;
+}
+
+export async function importMidiFromArrayBuffer(
+  arrayBuffer: ArrayBuffer,
+  mutators: MidiImportMutators
+): Promise<void> {
+  const { addTrack, addMidiClip, addArrangementClip, setTempo, setTimeSignature } = mutators;
+  const TICKS_PER_QUARTER_NOTE = 480;
+
+  if (!isMidiArrayBuffer(arrayBuffer)) {
+    throw new Error('Invalid MIDI data. The server may have returned an error or non-MIDI content.');
+  }
+
+  let midi: Midi;
+  try {
+    midi = new Midi(arrayBuffer);
+  } catch (e) {
+    throw new Error('Failed to parse MIDI file. The data may be corrupted or in an unsupported format.');
+  }
+
+  const tracksWithNotes = midi.tracks.filter((t) => t.notes.length > 0);
+  if (tracksWithNotes.length === 0) {
+    throw new Error('MIDI file has no tracks with notes. Nothing to import.');
+  }
+
+  if (midi.header.tempos.length > 0) {
+    setTempo(midi.header.tempos[0].bpm);
+  }
+
+  if (midi.header.timeSignatures.length > 0) {
+    const ts = midi.header.timeSignatures[0];
+    setTimeSignature({
+      numerator: ts.timeSignature[0],
+      denominator: ts.timeSignature[1],
+    });
+  }
+
+  const timeSignature = midi.header.timeSignatures[0];
+  const numerator = timeSignature?.timeSignature[0] || 4;
+  const denominator = timeSignature?.timeSignature[1] || 4;
+  const TICKS_PER_BAR = (numerator * TICKS_PER_QUARTER_NOTE * 4) / denominator;
+
+  const tempo = midi.header.tempos[0]?.bpm || 120;
+  const baseTimestamp = Date.now();
+
+  midi.tracks.forEach((midiTrack, trackIndex) => {
+    if (midiTrack.notes.length === 0) return;
+
+    const timestamp = baseTimestamp + trackIndex;
+    const random = Math.random().toString(36).substr(2, 9);
+    const trackId = `track-${timestamp}-${random}`;
+
+    const notes = midiTrack.notes.map((note) => {
+      const startTick = Math.round((note.time * tempo / 60) * TICKS_PER_QUARTER_NOTE);
+      const durationTick = Math.round((note.duration * tempo / 60) * TICKS_PER_QUARTER_NOTE);
+      return {
+        pitch: note.midi,
+        startTick,
+        durationTick,
+        velocity: note.velocity * 100,
+        channel: 0,
+      };
+    });
+
+    // Use known instrument types (piano, guitar, drums, etc.) so playback always works
+    const midiProgramFromFile = (midiTrack as { instrument?: { number?: number } }).instrument?.number;
+    const program = midiProgramFromFile !== undefined && midiProgramFromFile >= 0 && midiProgramFromFile <= 127
+      ? midiProgramFromFile
+      : null;
+
+    const instrument = suggestInstrument(
+      midiTrack.name || '',
+      midiTrack.channel ?? 0,
+      notes,
+      program
+    );
+    const trackType = (instrument === 'drums' || instrument === 'percussion') ? 'drums' : 'instrument';
+
+    addTrack({
+      id: trackId,
+      name: midiTrack.name || `Track ${trackIndex + 1}`,
+      color: `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')}`,
+      type: trackType,
+      channelRackIds: [],
+      instrument,
+      mixerChannelId: null,
+      mute: false,
+      solo: false,
+      arm: false,
+      volume: 0.5,
+      pan: 0,
+    });
+
+    const earliestTick = Math.min(...notes.map((n) => n.startTick));
+    const latestTick = Math.max(...notes.map((n) => n.startTick + n.durationTick));
+
+    const normalizedNotes = notes.map((note) => ({
+      ...note,
+      startTick: note.startTick - earliestTick,
+    }));
+
+    const clipLengthTicks = latestTick - earliestTick;
+    const clipLengthBars = Math.ceil(clipLengthTicks / TICKS_PER_BAR);
+
+    const midiClipId = `midi-${timestamp}-${random}`;
+    addMidiClip({
+      id: midiClipId,
+      trackId,
+      startBar: 0,
+      lengthBars: Math.max(1, clipLengthBars),
+      notes: normalizedNotes,
+    });
+
+    addArrangementClip({
+      id: `arr-${timestamp}-${random}`,
+      trackId,
+      startBar: 0,
+      lengthBars: Math.max(1, clipLengthBars),
+      clipType: 'midi',
+      clipDataId: midiClipId,
+    });
+  });
+}
+
+// Import MIDI from Blob (for API response)
+export async function importMidiFromBlob(
+  blob: Blob,
+  mutators: MidiImportMutators
+): Promise<void> {
+  const arrayBuffer = await blob.arrayBuffer();
+  return importMidiFromArrayBuffer(arrayBuffer, mutators);
+}
+
 // Import MIDI file and create tracks/notes
 export async function importMidiFile(
   file: File,
@@ -103,156 +307,32 @@ export async function importMidiFile(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    
-    reader.onload = async (e) => {
+
+    reader.onload = async () => {
       try {
-        const arrayBuffer = e.target?.result as ArrayBuffer;
+        const arrayBuffer = reader.result as ArrayBuffer;
         if (!arrayBuffer) {
           reject(new Error('Failed to read file'));
           return;
         }
-        
-        // Parse MIDI file
-        const midi = new Midi(arrayBuffer);
-        
-        // Update project tempo and time signature
-        if (midi.header.tempos.length > 0) {
-          setTempo(midi.header.tempos[0].bpm);
-        }
-        
-        if (midi.header.timeSignatures.length > 0) {
-          const ts = midi.header.timeSignatures[0];
-          setTimeSignature({
-            numerator: ts.timeSignature[0],
-            denominator: ts.timeSignature[1],
-          });
-        }
-        
-        // Constants for conversion
-        const TICKS_PER_QUARTER_NOTE = 480;
-        
-        // Get time signature (default to 4/4)
-        const timeSignature = midi.header.timeSignatures[0];
-        const numerator = timeSignature?.timeSignature[0] || 4;
-        const denominator = timeSignature?.timeSignature[1] || 4;
-        const TICKS_PER_BAR = (numerator * TICKS_PER_QUARTER_NOTE * 4) / denominator;
-        
-        // Get tempo
-        const tempo = midi.header.tempos[0]?.bpm || 120;
-        const baseTimestamp = Date.now();
-        
-        // Process each MIDI track
-        midi.tracks.forEach((midiTrack, trackIndex) => {
-          if (midiTrack.notes.length === 0) return; // Skip empty tracks
-          
-          // Create unique IDs with timestamp and random component
-          const timestamp = baseTimestamp + trackIndex;
-          const random = Math.random().toString(36).substr(2, 9);
-          const trackId = `track-${timestamp}-${random}`;
-          
-          // Get MIDI program number from track (default to 0 = Acoustic Grand Piano)
-          // MIDI program numbers are 0-127
-          // @tonejs/midi stores program changes in controlChanges with type 'program'
-          let midiProgram = 0;
-          if (midiTrack.controlChanges) {
-            // Look for program change events
-            const programChanges = Object.values(midiTrack.controlChanges).flat();
-            const programChange = programChanges.find((cc: any) => cc.type === 'program' || cc.number === 192);
-            if (programChange && programChange.value !== undefined) {
-              midiProgram = Math.round(programChange.value);
-            }
-          }
-          // Ensure program is in valid range (0-127)
-          midiProgram = Math.max(0, Math.min(127, midiProgram));
-          
-          const track = {
-            id: trackId,
-            name: midiTrack.name || `Track ${trackIndex + 1}`,
-            color: `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')}`,
-            type: 'instrument' as const,
-            channelRackIds: [],
-            instrument: `midi:${midiProgram}`, // Use MIDI program number for SoundFont instrument
-            midiProgram: midiProgram, // Store MIDI program number
-            mixerChannelId: null,
-            mute: false,
-            solo: false,
-            arm: false,
-            volume: 0.5,
-            pan: 0,
-          };
-          
-          addTrack(track);
-          
-          // Convert MIDI notes to our format
-          // @tonejs/midi provides time in seconds, we need to convert to ticks
-          const notes = midiTrack.notes.map((note) => {
-            // Convert time (seconds) back to ticks
-            // time * (tempo / 60) * ticks_per_quarter
-            const startTick = Math.round((note.time * tempo / 60) * TICKS_PER_QUARTER_NOTE);
-            const durationTick = Math.round((note.duration * tempo / 60) * TICKS_PER_QUARTER_NOTE);
-            
-            return {
-              pitch: note.midi,
-              startTick: startTick,
-              durationTick: durationTick,
-              velocity: note.velocity * 100,
-              channel: 0,
-            };
-          });
-          
-          // Find the earliest and latest notes to determine clip length
-          if (notes.length > 0) {
-            const earliestTick = Math.min(...notes.map(n => n.startTick));
-            const latestTick = Math.max(...notes.map(n => n.startTick + n.durationTick));
-            
-            // Normalize notes to start from 0
-            const normalizedNotes = notes.map(note => ({
-              ...note,
-              startTick: note.startTick - earliestTick,
-            }));
-            
-            // Calculate clip length in bars
-            const clipLengthTicks = latestTick - earliestTick;
-            const clipLengthBars = Math.ceil(clipLengthTicks / TICKS_PER_BAR);
-            
-            // Create MIDI clip with unique ID
-            const midiClipId = `midi-${timestamp}-${random}`;
-            const midiClip = {
-              id: midiClipId,
-              trackId: trackId,
-              startBar: 0,
-              lengthBars: Math.max(1, clipLengthBars),
-              notes: normalizedNotes,
-            };
-            
-            addMidiClip(midiClip);
-            
-            // Create arrangement clip at bar 0 with unique ID
-            const arrangementClipId = `arr-${timestamp}-${random}`;
-            const arrangementClip = {
-              id: arrangementClipId,
-              trackId: trackId,
-              startBar: 0,
-              lengthBars: Math.max(1, clipLengthBars),
-              clipType: 'midi' as const,
-              clipDataId: midiClipId,
-            };
-            
-            addArrangementClip(arrangementClip);
-          }
+        await importMidiFromArrayBuffer(arrayBuffer, {
+          addTrack,
+          addMidiClip,
+          addArrangementClip,
+          setTempo,
+          setTimeSignature,
         });
-        
         resolve();
       } catch (error) {
         console.error('Error importing MIDI:', error);
         reject(error);
       }
     };
-    
+
     reader.onerror = () => {
       reject(new Error('Failed to read file'));
     };
-    
+
     reader.readAsArrayBuffer(file);
   });
 }

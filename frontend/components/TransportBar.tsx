@@ -2,6 +2,7 @@
 
 import { useProjectStore } from '@/stores/projectStore';
 import { usePlayback } from '@/hooks/usePlayback';
+import { useInstruments } from '@/hooks/useInstruments';
 import * as Tone from 'tone';
 
 export default function TransportBar() {
@@ -18,8 +19,10 @@ export default function TransportBar() {
     setSongLength,
   } = useProjectStore();
 
-  // Initialize playback system
-  usePlayback(project, isPlaying, project?.tempo || 120, setPlayheadPosition);
+  const { getSynthesizer, playNote, instrumentsReady } = useInstruments(project?.tracks || []);
+
+  // Initialize playback system (re-schedules when instruments finish loading, e.g. after MIDI import)
+  usePlayback(project, isPlaying, project?.tempo || 120, setPlayheadPosition, instrumentsReady, getSynthesizer, playNote);
 
   const handlePlayPause = async () => {
     if (!isPlaying) {

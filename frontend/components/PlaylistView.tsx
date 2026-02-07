@@ -3,6 +3,7 @@
 import { useProjectStore } from '@/stores/projectStore';
 import { useState } from 'react';
 import { Settings } from 'lucide-react';
+import { getInstrumentName } from '@/utils/instruments';
 import TrackSettingsModal from './TrackSettingsMenu';
 
 export default function PlaylistView() {
@@ -77,10 +78,15 @@ export default function PlaylistView() {
                   : 'bg-zinc-900'
               }`}>
                 <div
-                  className="w-4 h-4 rounded"
+                  className="w-4 h-4 rounded flex-shrink-0"
                   style={{ backgroundColor: track.color }}
                 />
-                <span className="text-sm text-white flex-1 truncate">{track.name}</span>
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm text-white block truncate">{track.name}</span>
+                  <span className="text-xs text-zinc-500 truncate block">
+                    {getInstrumentName(track.instrument)}
+                  </span>
+                </div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

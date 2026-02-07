@@ -1,21 +1,20 @@
 import { useEffect, useRef, useCallback } from 'react';
 import * as Tone from 'tone';
 import type { Project, MidiNote } from '@/types/project';
-import { useInstruments } from './useInstruments';
 import { SoundfontInstrument } from '@/utils/soundfont';
 
-// Convert MIDI ticks to Tone.js time (in bars)
-// Assuming 1920 ticks per bar (standard MIDI resolution: 480 ticks per quarter note * 4)
-const TICKS_PER_BAR = 1920;
+type GetSynthesizer = (trackId: string) => Tone.ToneAudioNode | SoundfontInstrument | null;
+type PlayNoteFn = (trackId: string, note: string, duration?: string, time?: number, velocity?: number) => void;
 
-function ticksToBars(ticks: number): number {
-  return ticks / TICKS_PER_BAR;
+// Convert MIDI ticks to bars using project time signature (480 ticks per quarter note)
+function ticksToBars(ticks: number, numerator: number, denominator: number): number {
+  const ticksPerBar = (numerator * 480 * 4) / denominator;
+  return ticks / ticksPerBar;
 }
 
-// Convert MIDI note number to note name  
-// Add 12 to raise by one octave (12 semitones = 1 octave)
+// Convert MIDI note number to note name (60 = C4 in Tone.js)
 function midiToNoteName(midiNote: number): string {
-  return Tone.Frequency(midiNote + 12, 'midi').toNote();
+  return Tone.Frequency(midiNote, 'midi').toNote();
 }
 
 // Convert MIDI velocity (0-127) to gain (0-1)
@@ -27,9 +26,11 @@ export function usePlayback(
   project: Project | null,
   isPlaying: boolean,
   tempo: number,
-  setPlayheadPosition: (position: number) => void
+  setPlayheadPosition: (position: number) => void,
+  instrumentsReady: boolean = true,
+  getSynthesizer: GetSynthesizer,
+  playNote: PlayNoteFn
 ) {
-  const { getSynthesizer, playNote } = useInstruments(project?.tracks || []);
   const scheduledEventsRef = useRef<Tone.ToneEvent[]>([]);
   const playheadUpdateRef = useRef<number | null>(null);
 
@@ -37,6 +38,8 @@ export function usePlayback(
   // Use useCallback to ensure it uses the latest tempo and project
   const scheduleNotes = useCallback(() => {
     if (!project) return;
+
+    const { numerator, denominator } = project.timeSignature;
 
     // Clear any existing scheduled events
     scheduledEventsRef.current.forEach((event) => event.dispose());
@@ -104,7 +107,7 @@ export function usePlayback(
       const notesByStartTime = new Map<number, MidiNote[]>();
       
       allNotes.forEach(({ note, clipStartBars }) => {
-        const noteStartBars = clipStartBars + ticksToBars(note.startTick);
+        const noteStartBars = clipStartBars + ticksToBars(note.startTick, numerator, denominator);
         // Apply tempo scaling: divide by (tempo / 240)
         // This ensures notes play at the correct positions relative to tempo
         const tempoScaledBars = noteStartBars / (tempo / 240);
@@ -156,7 +159,7 @@ export function usePlayback(
             const noteName = midiToNoteName(note.pitch);
             // Convert duration from ticks to bars, then to Tone.js time string
             // This accurately preserves sustained note durations
-            const noteDurationBars = ticksToBars(note.durationTick);
+            const noteDurationBars = ticksToBars(note.durationTick, numerator, denominator);
             // Convert bars to Tone.js time string using 'm' (measures/bars)
             // This preserves the exact duration including sustained notes
             const noteDuration = noteDurationBars > 0 ? `${noteDurationBars}m` : '8n';
@@ -189,16 +192,17 @@ export function usePlayback(
             
             // All notes have the same velocity and duration
             const noteVelocity = notesAtTime[0].velocity;
-            const noteDurationBars = ticksToBars(notesAtTime[0].durationTick);
+            const noteDurationBars = ticksToBars(notesAtTime[0].durationTick, numerator, denominator);
             // Apply tempo scaling to duration to match tempo-scaled scheduling
             const tempoScaledDuration = noteDurationBars / (tempo / 240);
             
             // Convert MIDI velocity (0-127) to normalized velocity (0-1)
             const normalizedVelocity = noteVelocity / 127;
             
+            const noteDuration = noteDurationBars > 0 ? `${tempoScaledDuration}m` : '8n';
             const event = new Tone.ToneEvent((time) => {
               // Use velocity parameter to set per-note volume without affecting other voices
-              toneSynth.triggerAttackRelease(noteNames, tempoScaledDuration, time, normalizedVelocity);
+              toneSynth.triggerAttackRelease(noteNames, noteDuration, time, normalizedVelocity);
             });
             
             event.start(adjustedStartBars);
@@ -207,16 +211,17 @@ export function usePlayback(
             // Play individual notes (different velocities/durations in chord, or single notes, or non-PolySynth)
             notesAtTime.forEach((note) => {
               const noteName = midiToNoteName(note.pitch);
-              const noteDurationBars = ticksToBars(note.durationTick);
+              const noteDurationBars = ticksToBars(note.durationTick, numerator, denominator);
               // Apply tempo scaling to duration to match tempo-scaled scheduling
               const tempoScaledDuration = noteDurationBars / (tempo / 240);
               
               // Convert MIDI velocity (0-127) to normalized velocity (0-1)
               const normalizedVelocity = note.velocity / 127;
               
+              const noteDuration = noteDurationBars > 0 ? `${tempoScaledDuration}m` : '8n';
               const event = new Tone.ToneEvent((time) => {
                 // Use velocity parameter to set per-note volume without affecting other voices
-                toneSynth.triggerAttackRelease(noteName, tempoScaledDuration, time, normalizedVelocity);
+                toneSynth.triggerAttackRelease(noteName, noteDuration, time, normalizedVelocity);
               });
               
               event.start(adjustedStartBars);
@@ -229,7 +234,7 @@ export function usePlayback(
         lastStartBars = adjustedStartBars;
       });
     });
-  }, [project, tempo, getSynthesizer, playNote]);
+  }, [project, tempo, getSynthesizer, playNote, instrumentsReady]);
 
   // Update playhead position during playback
   useEffect(() => {
@@ -265,9 +270,9 @@ export function usePlayback(
     };
   }, [isPlaying, tempo, setPlayheadPosition]);
 
-  // Schedule notes when playback starts or tempo changes
+  // Schedule notes when playback starts, tempo changes, or instruments become ready (e.g. after MIDI import)
   useEffect(() => {
-    if (isPlaying && project) {
+    if (isPlaying && project && instrumentsReady) {
       // Set BPM synchronously first - this is critical for proper timing
       Tone.getTransport().bpm.value = tempo;
       
@@ -304,7 +309,7 @@ export function usePlayback(
       scheduledEventsRef.current.forEach((event) => event.dispose());
       scheduledEventsRef.current = [];
     };
-  }, [isPlaying, project, tempo]);
+  }, [isPlaying, project, tempo, instrumentsReady, scheduleNotes]);
 
   return {
     scheduleNotes,

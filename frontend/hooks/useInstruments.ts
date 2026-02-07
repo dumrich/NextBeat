@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import * as Tone from 'tone';
 import { createInstrument, InstrumentId, isSoundfontInstrument } from '@/utils/instruments';
 import { SoundfontInstrument } from '@/utils/soundfont';
@@ -7,30 +7,62 @@ import type { Track } from '@/types/project';
 // Store synthesizer instances per track (can be Tone.js or SoundFont)
 const synthesizerCache = new Map<string, Tone.ToneAudioNode | SoundfontInstrument>();
 
+// Remember which instrument each cached synth is for (so we reload when user changes instrument)
+const trackInstrumentCache = new Map<string, string>();
+
 export function useInstruments(tracks: Track[]) {
   const cacheRef = useRef(synthesizerCache);
+  const [instrumentsReady, setInstrumentsReady] = useState(false);
 
   // Initialize synthesizers for all tracks
   useEffect(() => {
+    setInstrumentsReady(false);
+
+    // Invalidate cache when a track's instrument changed (user picked different piano/guitar/etc.)
+    tracks.forEach((track) => {
+      if (track.instrument && cacheRef.current.has(track.id)) {
+        const cachedInstrument = trackInstrumentCache.get(track.id);
+        if (cachedInstrument !== track.instrument) {
+          const synth = cacheRef.current.get(track.id);
+          if (synth && 'dispose' in synth && typeof synth.dispose === 'function') {
+            try {
+              synth.dispose();
+            } catch (e) {
+              // ignore
+            }
+          }
+          cacheRef.current.delete(track.id);
+          trackInstrumentCache.delete(track.id);
+        }
+      }
+    });
+
     const loadInstruments = async () => {
+      const tracksNeedingLoad = tracks.filter(
+        (t) => t.instrument && !cacheRef.current.has(t.id)
+      );
+      if (tracksNeedingLoad.length === 0) {
+        setInstrumentsReady(true);
+        return;
+      }
+
       for (const track of tracks) {
         if (track.instrument && !cacheRef.current.has(track.id)) {
           try {
-            // Get audio context (use Tone.js context or create new one)
             const audioContext = Tone.getContext().rawContext as AudioContext;
-            
-            // Create instrument (async for SoundFont, sync for Tone.js)
             const synth = await createInstrument(
               track.instrument,
               audioContext,
               track.midiProgram
             );
             cacheRef.current.set(track.id, synth);
+            trackInstrumentCache.set(track.id, track.instrument);
           } catch (error) {
             // Failed to create instrument
           }
         }
       }
+      setInstrumentsReady(true);
     };
 
     loadInstruments();
@@ -44,6 +76,7 @@ export function useInstruments(tracks: Track[]) {
             synth.dispose();
           }
           cacheRef.current.delete(trackId);
+          trackInstrumentCache.delete(trackId);
         } catch (error) {
           // Failed to dispose synthesizer
         }
@@ -56,18 +89,18 @@ export function useInstruments(tracks: Track[]) {
   // 2. Synthesizers should persist across view switches
   // 3. Cleanup is handled when tracks are removed (lines 25-36)
 
-  // Get synthesizer for a specific track
-  const getSynthesizer = (trackId: string): Tone.ToneAudioNode | SoundfontInstrument | null => {
+  // Get synthesizer for a specific track (stable reference so usePlayback doesn't re-schedule every render)
+  const getSynthesizer = useCallback((trackId: string): Tone.ToneAudioNode | SoundfontInstrument | null => {
     return cacheRef.current.get(trackId) || null;
-  };
+  }, []);
 
   // Store base volume per track (before velocity adjustments)
   const baseVolumes = useRef(new Map<string, number>());
   // Track active note previews to prevent volume restoration conflicts
   const activePreviews = useRef(new Map<string, number>());
 
-  // Play a note on a track's synthesizer
-  const playNote = (trackId: string, note: string, duration?: string, time?: number, velocity?: number) => {
+  // Play a note on a track's synthesizer (stable reference)
+  const playNote = useCallback((trackId: string, note: string, duration?: string, time?: number, velocity?: number) => {
     const synth = getSynthesizer(trackId);
     if (!synth) return;
 
@@ -81,7 +114,7 @@ export function useInstruments(tracks: Track[]) {
           const velocityValue = velocity !== undefined ? velocity : 100;
           const noteDuration = duration || '8n';
           // triggerAttackRelease is async, but we don't need to await it for preview
-          synth.triggerAttackRelease(midiNote, noteDuration, undefined, velocityValue).catch(() => {
+          synth.triggerAttackRelease(midiNote, noteDuration, time, velocityValue).catch(() => {
             // Error playing note - silently fail
           });
           console.log('Playing note', note, noteDuration);
@@ -146,7 +179,7 @@ export function useInstruments(tracks: Track[]) {
         }
       }, (durationSeconds * 1000) + 50); // Add 50ms buffer
     }
-  };
+  }, []);
 
   // Convert note name (e.g., "C4") to MIDI note number (0-127)
   function noteNameToMidi(noteName: string): number | null {
@@ -165,5 +198,6 @@ export function useInstruments(tracks: Track[]) {
   return {
     getSynthesizer,
     playNote,
+    instrumentsReady,
   };
 }
