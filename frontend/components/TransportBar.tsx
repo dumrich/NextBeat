@@ -11,7 +11,6 @@ export default function TransportBar() {
     playheadPosition,
     snapGrid,
     songLength,
-    selectedTrackId,
     setTempo,
     setIsPlaying,
     setPlayheadPosition,
@@ -26,8 +25,6 @@ export default function TransportBar() {
     if (!isPlaying) {
       await Tone.start();
       if (project) {
-        console.log(selectedTrackId);
-        console.log(project.midiClips);
         Tone.getTransport().bpm.value = project.tempo;
         // Start from current playhead position
         // Convert bars to seconds: (bars * 4 beats/bar) / (bpm / 60)
