@@ -46,12 +46,57 @@ export function useInstruments(tracks: Track[]) {
     return cacheRef.current.get(trackId) || null;
   };
 
+  // Store base volume per track (before velocity adjustments)
+  const baseVolumes = useRef(new Map<string, number>());
+  // Track active note previews to prevent volume restoration conflicts
+  const activePreviews = useRef(new Map<string, number>());
+
   // Play a note on a track's synthesizer
-  const playNote = (trackId: string, note: string, duration?: string, time?: number) => {
+  const playNote = (trackId: string, note: string, duration?: string, time?: number, velocity?: number) => {
     const synth = getSynthesizer(trackId);
     if (synth && 'triggerAttackRelease' in synth) {
       const playable = synth as Tone.PolySynth | Tone.MonoSynth | Tone.Synth | Tone.FMSynth | Tone.AMSynth | Tone.DuoSynth | Tone.PluckSynth | Tone.MembraneSynth | Tone.MetalSynth;
-      playable.triggerAttackRelease(note, duration || '8n', time);
+      
+      // Get or set base volume for this track (first time, save current volume as base)
+      if (!baseVolumes.current.has(trackId)) {
+        baseVolumes.current.set(trackId, playable.volume.value);
+      }
+      const baseVolume = baseVolumes.current.get(trackId)!;
+      
+      // Increment active preview counter
+      const currentCount = activePreviews.current.get(trackId) || 0;
+      activePreviews.current.set(trackId, currentCount + 1);
+      
+      // Convert velocity (0-127) to gain (0-1), default to 100 (full velocity)
+      const velocityValue = velocity !== undefined ? velocity : 100;
+      const velocityGain = velocityValue / 127;
+      
+      // Calculate volume: base volume + velocity adjustment
+      // Velocity gain (0-1) converted to dB, then added to base volume
+      const velocityDb = Tone.gainToDb(velocityGain);
+      const targetVolume = baseVolume + velocityDb;
+      
+      // Set volume for this note (relative to base, not current)
+      playable.volume.value = targetVolume;
+      
+      // Play the note
+      const noteDuration = duration || '8n';
+      playable.triggerAttackRelease(note, noteDuration, time);
+      
+      // Restore base volume after the note duration
+      // Convert duration to seconds and add a small buffer
+      const durationSeconds = Tone.Time(noteDuration).toSeconds();
+      setTimeout(() => {
+        // Decrement active preview counter
+        const count = activePreviews.current.get(trackId) || 0;
+        activePreviews.current.set(trackId, Math.max(0, count - 1));
+        
+        // Only restore to base volume if this was the last active preview
+        // This prevents restoring volume while other notes are still playing
+        if (activePreviews.current.get(trackId) === 0) {
+          playable.volume.value = baseVolume;
+        }
+      }, (durationSeconds * 1000) + 50); // Add 50ms buffer
     }
   };
 

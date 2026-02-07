@@ -78,8 +78,8 @@ export function usePlayback(
       // PolySynth and other synthesizers that support triggerAttackRelease
       const playable = synth as Tone.PolySynth | Tone.MonoSynth | Tone.Synth | Tone.FMSynth | Tone.AMSynth | Tone.DuoSynth | Tone.PluckSynth | Tone.MembraneSynth | Tone.MetalSynth;
 
-      // Set track volume once (for PolySynth, this affects all voices)
-      playable.volume.value = Tone.gainToDb(track.volume);
+      // Store base track volume - we'll combine this with note velocity per note
+      const baseTrackVolume = track.volume;
 
       // Collect all notes from all clips on this track
       const allNotes: Array<{ note: MidiNote, clipStartBars: number }> = [];
@@ -135,24 +135,45 @@ export function usePlayback(
           lastStartBars + 0.00001
         );
         
-        // For PolySynth, we can play multiple notes (chords) at once
-        if (playable instanceof Tone.PolySynth && notesAtTime.length > 1) {
-          // Play chord: pass array of note names
+        // For PolySynth chords with same velocity, play together; otherwise play individually
+        const hasDifferentVelocities = notesAtTime.length > 1 && 
+          notesAtTime.some(note => note.velocity !== notesAtTime[0].velocity);
+        
+        if (playable instanceof Tone.PolySynth && notesAtTime.length > 1 && !hasDifferentVelocities) {
+          // Play chord: all notes have same velocity, so we can play them together
           const noteNames = notesAtTime.map(note => midiToNoteName(note.pitch));
           
+          // All notes have the same velocity, so use that
+          const noteVelocity = notesAtTime[0].velocity;
+          // Combine note velocity (0-127) with track volume (0-1)
+          // Final gain = (note.velocity / 127) * track.volume
+          const combinedGain = (noteVelocity / 127) * baseTrackVolume;
+          const velocityDb = Tone.gainToDb(combinedGain);
+          
           const event = new Tone.ToneEvent((time) => {
-            // PolySynth can play multiple notes simultaneously
+            // Set volume for this chord based on combined velocity
+            // Note: This affects all voices, but since all notes in chord have same velocity, it's OK
+            playable.volume.value = velocityDb;
             playable.triggerAttackRelease(noteNames, duration, time);
           });
           
           event.start(adjustedStartBars);
           scheduledEventsRef.current.push(event);
         } else {
-          // Play individual notes (for non-PolySynth or single notes)
+          // Play individual notes (different velocities in chord, or single notes, or non-PolySynth)
           notesAtTime.forEach((note) => {
             const noteName = midiToNoteName(note.pitch);
             
+            // Combine note velocity (0-127) with track volume (0-1)
+            // Final gain = (note.velocity / 127) * track.volume
+            const combinedGain = (note.velocity / 127) * baseTrackVolume;
+            const velocityDb = Tone.gainToDb(combinedGain);
+            
             const event = new Tone.ToneEvent((time) => {
+              // Set volume for this specific note based on its velocity
+              // Note: For PolySynth, this affects all voices, so chords with different velocities
+              // will be played individually (handled above)
+              playable.volume.value = velocityDb;
               playable.triggerAttackRelease(noteName, duration, time);
             });
             

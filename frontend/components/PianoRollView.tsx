@@ -48,7 +48,14 @@ export default function PianoRollView() {
   } = useProjectStore();
   const [isDragging, setIsDragging] = useState(false);
   const [lastProcessedCell, setLastProcessedCell] = useState<string | null>(null);
+  const [selectedNoteIndices, setSelectedNoteIndices] = useState<Set<number>>(new Set());
+  const [draggedNoteIndex, setDraggedNoteIndex] = useState<number | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null);
+  const [originalNotePosition, setOriginalNotePosition] = useState<{ pitch: number; startTick: number } | null>(null);
+  const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
+  const [velocityEditNote, setVelocityEditNote] = useState<{ index: number; velocity: number } | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const dragPositionRef = useRef<{ x: number; y: number } | null>(null);
   const { playNote } = useInstruments(project?.tracks || []);
 
   if (!project) return null;
@@ -85,10 +92,20 @@ export default function PianoRollView() {
         e.preventDefault();
         undo();
       }
+      
+      // Delete selected notes
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedTool === 'select' && selectedNoteIndices.size > 0 && activeClip) {
+          e.preventDefault();
+          const updatedNotes = activeClip.notes.filter((_, index) => !selectedNoteIndices.has(index));
+          updateMidiClip(activeClip.id, { notes: updatedNotes });
+          setSelectedNoteIndices(new Set());
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo]);
+  }, [undo, selectedTool, selectedNoteIndices, activeClip, updateMidiClip]);
 
   // Ensure we have a clip to work with
   const ensureActiveClip = () => {
@@ -189,8 +206,82 @@ export default function PianoRollView() {
     }
   };
 
-  const handleMouseDown = (noteIndex: number, tick: number) => {
+  // Find note at a given position (grid cell)
+  const findNoteAtPosition = (noteIndex: number, tick: number): number | null => {
+    if (!activeClip) return null;
+    const pitch = NOTE_TO_MIDI[NOTES[noteIndex]];
+    const noteIndexInClip = activeClip.notes.findIndex(
+      (n) => n.pitch === pitch && Math.abs(n.startTick - tick) < ticksPerStep / 2
+    );
+    return noteIndexInClip >= 0 ? noteIndexInClip : null;
+  };
+
+  // Check if a position has a note (excluding the dragged note)
+  const hasNoteAtPosition = (pitch: number, tick: number, excludeIndex: number | null): boolean => {
+    if (!activeClip) return false;
+    return activeClip.notes.some((note, index) => {
+      if (excludeIndex !== null && index === excludeIndex) return false;
+      return note.pitch === pitch && Math.abs(note.startTick - tick) < ticksPerStep / 2;
+    });
+  };
+
+  const handleMouseDown = (noteIndex: number, tick: number, e: React.MouseEvent) => {
     if (!selectedTrack || !selectedTrackId) return;
+    
+    // Handle select mode
+    if (selectedTool === 'select') {
+      const foundNoteIndex = findNoteAtPosition(noteIndex, tick);
+      
+      if (foundNoteIndex !== null) {
+        // Clicked on a note - start dragging
+        if (e.button === 0) { // Left click
+          // If not already selected, select only this note
+          if (!selectedNoteIndices.has(foundNoteIndex)) {
+            setSelectedNoteIndices(new Set([foundNoteIndex]));
+          }
+          
+          const note = activeClip!.notes[foundNoteIndex];
+          
+          // Store original position for potential revert
+          setOriginalNotePosition({
+            pitch: note.pitch,
+            startTick: note.startTick,
+          });
+          
+          setIsDragging(true);
+          setDraggedNoteIndex(foundNoteIndex);
+          
+          // Calculate drag offset from note top-left corner
+          const noteNoteIndex = NOTES.findIndex((n) => NOTE_TO_MIDI[n] === note.pitch);
+          const stepPosition = note.startTick / ticksPerStep;
+          const noteX = stepPosition * pixelsPerBar;
+          const noteY = noteNoteIndex * noteHeight;
+          
+          const rect = gridRef.current?.getBoundingClientRect();
+          if (rect) {
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            setDragOffset({
+              x: mouseX - noteX,
+              y: mouseY - noteY,
+            });
+            setDragPosition({
+              x: noteX,
+              y: noteY,
+            });
+          }
+        } else if (e.button === 2) { // Right click
+          // Right click on note - open velocity editor
+          e.preventDefault();
+          const note = activeClip!.notes[foundNoteIndex];
+          setVelocityEditNote({ index: foundNoteIndex, velocity: note.velocity });
+        }
+      } else {
+        // Clicked on empty space - deselect all
+        setSelectedNoteIndices(new Set());
+      }
+      return;
+    }
     
     // Don't play note preview when erasing
     if (selectedTool !== 'erase') {
@@ -205,7 +296,8 @@ export default function PianoRollView() {
         const noteName = NOTES[noteIndex];
         const snapGridFraction = SNAPGRID_TO_FRACTION[snapGrid];
         const duration = `${snapGridFraction}n`; // e.g., "16n" for 1/16
-        playNote(selectedTrackId, noteName, duration);
+        // Play at 50% velocity (64 out of 127)
+        playNote(selectedTrackId, noteName, duration, undefined, 64);
       }
     }
     
@@ -229,6 +321,38 @@ export default function PianoRollView() {
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging || !gridRef.current || !selectedTrack || !selectedTrackId) return;
+    
+    // Handle note dragging in select mode - free movement (NO grid snapping during drag)
+    if (selectedTool === 'select' && draggedNoteIndex !== null && activeClip && dragOffset) {
+      e.preventDefault(); // Prevent any default behavior
+      e.stopPropagation(); // Stop event propagation
+      const rect = gridRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      // Calculate target position (subtract drag offset) - completely free movement, NO snapping
+      const targetX = mouseX - dragOffset.x;
+      const targetY = mouseY - dragOffset.y;
+      
+      // Update both state and ref for visual position ONLY - do NOT update note data
+      // Constrain to bounds but don't snap to grid
+      const newPosition = {
+        x: Math.max(0, Math.min(
+          (songLength * SNAPGRID_TO_FRACTION[snapGrid] - 1) * pixelsPerBar,
+          targetX
+        )),
+        y: Math.max(0, Math.min(
+          (NOTES.length - 1) * noteHeight,
+          targetY
+        )),
+      };
+      
+      dragPositionRef.current = newPosition;
+      setDragPosition(newPosition);
+      
+      return;
+    }
+    
     if (selectedTool !== 'draw' && selectedTool !== 'erase') return;
 
     const rect = gridRef.current.getBoundingClientRect();
@@ -263,7 +387,8 @@ export default function PianoRollView() {
           const noteName = NOTES[noteIndex];
           const snapGridFraction = SNAPGRID_TO_FRACTION[snapGrid];
           const duration = `${snapGridFraction}n`;
-          playNote(selectedTrackId, noteName, duration);
+          // Play at 50% velocity (64 out of 127)
+          playNote(selectedTrackId, noteName, duration, undefined, 64);
         }
         
         addNoteAtPosition(noteIndex, tick);
@@ -274,8 +399,68 @@ export default function PianoRollView() {
   };
 
   const handleMouseUp = () => {
+    if (!isDragging) return;
+
+    console.log('handleMouseUp', dragPosition);
+    
+    // Handle note drop in select mode - snap to grid and check collisions
+    if (selectedTool === 'select' && draggedNoteIndex !== null && activeClip && dragPosition && originalNotePosition) {
+      // Calculate snapped position
+      const noteIndex = Math.max(0, Math.min(NOTES.length - 1, Math.floor(dragPosition.y / noteHeight)));
+      const stepIndex = Math.max(0, Math.min(
+        songLength * SNAPGRID_TO_FRACTION[snapGrid] - 1,
+        Math.floor(dragPosition.x / pixelsPerBar)
+      ));
+      
+      // Calculate new tick position (snapped to grid)
+      const newTick = (stepIndex * ticksPerBar) / SNAPGRID_TO_FRACTION[snapGrid];
+      const newPitch = NOTE_TO_MIDI[NOTES[noteIndex]];
+      
+      // Check for collision with existing notes (excluding the dragged note)
+      const hasCollision = hasNoteAtPosition(newPitch, newTick, draggedNoteIndex);
+      
+      if (hasCollision) {
+        // Revert to original position
+        const updatedNotes = [...activeClip.notes];
+        updatedNotes[draggedNoteIndex] = {
+          ...updatedNotes[draggedNoteIndex],
+          pitch: originalNotePosition.pitch,
+          startTick: originalNotePosition.startTick,
+        };
+        updateMidiClip(activeClip.id, { notes: updatedNotes });
+      } else {
+        // Apply the move
+        const updatedNotes = [...activeClip.notes];
+        updatedNotes[draggedNoteIndex] = {
+          ...updatedNotes[draggedNoteIndex],
+          pitch: newPitch,
+          startTick: newTick,
+        };
+        updateMidiClip(activeClip.id, { notes: updatedNotes });
+      }
+    }
+    
     setIsDragging(false);
     setLastProcessedCell(null);
+    setDraggedNoteIndex(null);
+    setDragOffset(null);
+    setOriginalNotePosition(null);
+    setDragPosition(null);
+    dragPositionRef.current = null;
+  };
+
+  // Handle velocity update
+  const handleVelocityChange = (newVelocity: number) => {
+    if (!velocityEditNote || !activeClip) return;
+    
+    const updatedNotes = [...activeClip.notes];
+    updatedNotes[velocityEditNote.index] = {
+      ...updatedNotes[velocityEditNote.index],
+      velocity: Math.max(0, Math.min(127, newVelocity)),
+    };
+    
+    updateMidiClip(activeClip.id, { notes: updatedNotes });
+    setVelocityEditNote(null);
   };
 
 
@@ -360,19 +545,94 @@ export default function PianoRollView() {
               if (!clip) return null;
               const ticksPerStep = ticksPerBar / SNAPGRID_TO_FRACTION[snapGrid];
               return clip.notes.map((note, index) => {
+                const isDraggingThisNote = draggedNoteIndex === index && isDragging;
+                const isSelected = selectedNoteIndices.has(index);
+                
+                // During drag, use dragPosition exclusively - don't calculate from note data
+                let top: number;
+                let left: number;
+                
+                // Use ref first (most up-to-date), then state, then calculate from note
+                const currentDragPos = dragPositionRef.current || dragPosition;
+                
+                // Calculate base position from note data (always needed for width/height calculations)
                 const noteIndex = NOTES.findIndex((n) => NOTE_TO_MIDI[n] === note.pitch);
                 if (noteIndex === -1) return null;
                 const stepPosition = note.startTick / ticksPerStep;
+                const baseTop = noteIndex * noteHeight;
+                const baseLeft = stepPosition * pixelsPerBar;
+                
+                // CRITICAL: Only use drag position if we're actively dragging THIS note
+                // This prevents any accidental fallback to note data during drag
+                let transform = '';
+                if (isDraggingThisNote && currentDragPos !== null) {
+                  // Use transform for smooth dragging - calculate offset from base position
+                  const offsetX = currentDragPos.x - baseLeft;
+                  const offsetY = currentDragPos.y - baseTop;
+                  transform = `translate(${offsetX}px, ${offsetY}px)`;
+                }
+                
                 const stepDuration = note.durationTick / ticksPerStep;
+                
                 return (
                   <div
                     key={index}
-                    className="absolute bg-blue-500 border border-blue-400 cursor-move"
+                    className={`absolute border ${
+                      selectedTool === 'select' ? 'cursor-move' : 'cursor-default'
+                    } ${
+                      isSelected || isDraggingThisNote
+                        ? 'bg-blue-400 border-blue-300 z-10'
+                        : 'bg-blue-500 border-blue-400 z-10'
+                    }`}
                     style={{
-                      top: `${noteIndex * noteHeight}px`,
-                      left: `${stepPosition * pixelsPerBar}px`,
+                      top: `${baseTop}px`,
+                      left: `${baseLeft}px`,
                       width: `${stepDuration * pixelsPerBar}px`,
                       height: `${noteHeight - 2}px`,
+                      transform: transform || undefined,
+                      // During drag, disable pointer events so mouse events pass through to grid
+                      // When not dragging, enable pointer events only in select mode
+                      pointerEvents: isDraggingThisNote ? 'none' : (selectedTool === 'select' ? 'auto' : 'none'),
+                      transition: isDraggingThisNote ? 'none' : undefined, // No transition during drag
+                      willChange: isDraggingThisNote ? 'transform' : 'auto', // Optimize for dragging
+                    }}
+                    onMouseDown={(e) => {
+                      if (selectedTool === 'select') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (!selectedNoteIndices.has(index)) {
+                          setSelectedNoteIndices(new Set([index]));
+                        }
+                        
+                        // Store original position
+                        setOriginalNotePosition({
+                          pitch: note.pitch,
+                          startTick: note.startTick,
+                        });
+                        
+                        setIsDragging(true);
+                        setDraggedNoteIndex(index);
+                        
+                        const rect = gridRef.current?.getBoundingClientRect();
+                        if (rect) {
+                          const mouseX = e.clientX - rect.left;
+                          const mouseY = e.clientY - rect.top;
+                          setDragOffset({
+                            x: mouseX - baseLeft,
+                            y: mouseY - baseTop,
+                          });
+                          const initialPos = { x: baseLeft, y: baseTop };
+                          dragPositionRef.current = initialPos;
+                          setDragPosition(initialPos);
+                        }
+                      }
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (selectedTool === 'select') {
+                        setVelocityEditNote({ index, velocity: note.velocity });
+                      }
                     }}
                   />
                 );
@@ -386,6 +646,12 @@ export default function PianoRollView() {
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseUp}
               onMouseMove={handleMouseMove}
+              onContextMenu={(e) => e.preventDefault()}
+              style={{
+                // Ensure grid is always on top to capture mouse events during drag
+                zIndex: isDragging ? 20 : 0,
+                pointerEvents: 'auto',
+              }}
             >
               {NOTES.map((_, noteIndex) => (
                 <div 
@@ -400,17 +666,20 @@ export default function PianoRollView() {
                         key={stepIndex}
                         onMouseDown={(e) => {
                           e.preventDefault();
-                          handleMouseDown(noteIndex, tick);
+                          handleMouseDown(noteIndex, tick, e);
                         }}
                         className={`absolute border-b border-r border-zinc-800 ${
                           selectedTool === 'draw' || selectedTool === 'erase'
                             ? 'hover:bg-zinc-900/50 cursor-crosshair'
+                            : selectedTool === 'select'
+                            ? 'hover:bg-zinc-900/30 cursor-pointer'
                             : 'hover:bg-zinc-900/30 cursor-pointer'
                         }`}
                         style={{
                           left: `${stepIndex * pixelsPerBar}px`,
                           width: `${pixelsPerBar}px`,
                           height: '100%',
+                          pointerEvents: selectedTool === 'select' ? 'auto' : 'auto',
                         }}
                       />
                     );
@@ -422,6 +691,58 @@ export default function PianoRollView() {
         </div>
         )}
       </div>
+
+      {/* Velocity Editor Modal */}
+      {velocityEditNote && activeClip && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setVelocityEditNote(null)}>
+          <div className="bg-zinc-800 rounded-lg p-6 border border-zinc-700" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-4 text-white">Edit Velocity</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-zinc-300 mb-2">
+                  Velocity: {velocityEditNote.velocity} (0-127)
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="127"
+                  value={velocityEditNote.velocity}
+                  onChange={(e) => {
+                    const newVelocity = parseInt(e.target.value);
+                    setVelocityEditNote({ ...velocityEditNote, velocity: newVelocity });
+                  }}
+                  className="w-full"
+                />
+                <div className="flex gap-2 mt-4">
+                  <input
+                    type="number"
+                    min="0"
+                    max="127"
+                    value={velocityEditNote.velocity}
+                    onChange={(e) => {
+                      const newVelocity = parseInt(e.target.value) || 0;
+                      setVelocityEditNote({ ...velocityEditNote, velocity: Math.max(0, Math.min(127, newVelocity)) });
+                    }}
+                    className="px-3 py-2 bg-zinc-900 border border-zinc-700 rounded text-white w-24"
+                  />
+                  <button
+                    onClick={() => handleVelocityChange(velocityEditNote.velocity)}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-white"
+                  >
+                    Apply
+                  </button>
+                  <button
+                    onClick={() => setVelocityEditNote(null)}
+                    className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 rounded text-white"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
