@@ -81,7 +81,7 @@ export function useInstruments(tracks: Track[]) {
           const velocityValue = velocity !== undefined ? velocity : 100;
           const noteDuration = duration || '8n';
           // triggerAttackRelease is async, but we don't need to await it for preview
-          synth.triggerAttackRelease(midiNote, noteDuration, undefined, velocityValue * 100).catch(() => {
+          synth.triggerAttackRelease(midiNote, noteDuration, undefined, velocityValue).catch(() => {
             // Error playing note - silently fail
           });
           console.log('Playing note', note, noteDuration);

@@ -195,7 +195,7 @@ export async function importMidiFile(
               pitch: note.midi,
               startTick: startTick,
               durationTick: durationTick,
-              velocity: note.velocity,
+              velocity: note.velocity * 100,
               channel: 0,
             };
           });
