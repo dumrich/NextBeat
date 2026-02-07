@@ -43,7 +43,6 @@ export default function PianoRollView() {
     updateMidiClip,
     addArrangementClip,
   } = useProjectStore();
-  const [selectedClip, setSelectedClip] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [lastProcessedCell, setLastProcessedCell] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -60,9 +59,8 @@ export default function PianoRollView() {
         .filter((mc): mc is NonNullable<typeof mc> => mc !== undefined)
     : [];
   
-  const activeClip = selectedClip 
-    ? project.midiClips.find((c) => c.id === selectedClip)
-    : trackMidiClips[0] || null;
+  // Always use the first MIDI clip for the selected track
+  const activeClip = trackMidiClips[0] || null;
 
   const ticksPerBar = 1920;
   const pixelsPerBar = (24 * 4) / SNAPGRID_TO_FRACTION[snapGrid];
@@ -74,10 +72,27 @@ export default function PianoRollView() {
   const ensureActiveClip = () => {
     if (!selectedTrack) return null;
     
-    if (activeClip) return activeClip;
+    // Check if a clip already exists for this track (check store directly to avoid stale closures)
+    const currentState = useProjectStore.getState();
+    const currentProject = currentState.project;
+    if (!currentProject) return null;
+    
+    const existingArrClip = currentProject.arrangementClips.find(
+      (c) => c.trackId === selectedTrack.id && c.clipType === 'midi'
+    );
+    
+    if (existingArrClip) {
+      const existingClip = currentProject.midiClips.find((c) => c.id === existingArrClip.clipDataId);
+      if (existingClip) {
+        return existingClip;
+      }
+    }
     
     // Create a new clip if none exists
-    const newClipId = `clip-${Date.now()}`;
+    // Use timestamp + random to ensure uniqueness
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substr(2, 9);
+    const newClipId = `clip-${timestamp}-${random}`;
     const newClip = {
       id: newClipId,
       trackId: selectedTrack.id,
@@ -89,7 +104,7 @@ export default function PianoRollView() {
     addMidiClip(newClip);
     
     const newArrangementClip = {
-      id: `arr-${Date.now()}`,
+      id: `arr-${timestamp}-${random}`,
       trackId: selectedTrack.id,
       startBar: 0,
       lengthBars: songLength,
@@ -98,7 +113,6 @@ export default function PianoRollView() {
     };
     
     addArrangementClip(newArrangementClip);
-    setSelectedClip(newClipId);
     
     return newClip;
   };
@@ -209,20 +223,6 @@ export default function PianoRollView() {
     setLastProcessedCell(null);
   };
 
-  // Update activeClip reference when project updates
-  useEffect(() => {
-    if (selectedClip) {
-      const clip = project.midiClips.find((c) => c.id === selectedClip);
-      if (!clip) setSelectedClip(null);
-    } else if (selectedTrack && trackMidiClips.length > 0) {
-      const firstArrClip = project.arrangementClips.find(
-        (c) => c.trackId === selectedTrack.id && c.clipType === 'midi'
-      );
-      if (firstArrClip) {
-        setSelectedClip(firstArrClip.clipDataId);
-      }
-    }
-  }, [project.midiClips, project.arrangementClips, selectedTrack, selectedClip, trackMidiClips]);
 
   return (
     <div className="h-full bg-black flex flex-col">

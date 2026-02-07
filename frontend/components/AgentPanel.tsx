@@ -53,23 +53,24 @@ export default function AgentPanel() {
     
     const { addPattern, addMidiClip, addArrangementClip, addTrack } = useProjectStore.getState();
     const timestamp = Date.now();
+    const random = Math.random().toString(36).substr(2, 9);
     
     if (edit.type === 'addPattern') {
-      const patternId = `pattern-${timestamp}`;
+      const patternId = `pattern-${timestamp}-${random}`;
       addPattern({
         id: patternId,
         name: edit.data.name,
         steps: edit.data.steps,
         channels: edit.data.channels.map((ch: any, idx: number) => ({
           ...ch,
-          id: `channel-${timestamp}-${idx}`,
+          id: `channel-${timestamp}-${random}-${idx}`,
         })),
       });
       // Also create an arrangement clip for the pattern
       const trackId = project.tracks[0]?.id;
       if (trackId) {
         addArrangementClip({
-          id: `arr-${timestamp}`,
+          id: `arr-${timestamp}-${random}`,
           trackId,
           startBar: 0,
           lengthBars: edit.data.steps / 4, // Assuming 4 steps per bar
@@ -78,7 +79,7 @@ export default function AgentPanel() {
         });
       }
     } else if (edit.type === 'addTrack') {
-      const trackId = `track-${timestamp}`;
+      const trackId = `track-${timestamp}-${random}`;
       addTrack({
         id: trackId,
         name: edit.data.name || 'New Track',
@@ -94,7 +95,7 @@ export default function AgentPanel() {
         pan: 0,
       });
     } else if (edit.type === 'addClip') {
-      const clipId = `clip-${timestamp}`;
+      const clipId = `clip-${timestamp}-${random}`;
       // Find track by name, or use first track
       const trackId = project.tracks.find((t) => t.name === edit.data.trackName)?.id || project.tracks[0]?.id;
       if (trackId) {
@@ -106,7 +107,7 @@ export default function AgentPanel() {
           notes: edit.data.notes,
         });
         addArrangementClip({
-          id: `arr-${timestamp}`,
+          id: `arr-${timestamp}-${random}`,
           trackId,
           startBar: edit.data.startBar,
           lengthBars: edit.data.lengthBars,
