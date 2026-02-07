@@ -146,11 +146,12 @@ export function usePlayback(
           // Convert MIDI note numbers to note names for playNote
           notesAtTime.forEach((note) => {
             const noteName = midiToNoteName(note.pitch);
+            // Convert duration from ticks to bars, then to Tone.js time string
+            // This accurately preserves sustained note durations
             const noteDurationBars = ticksToBars(note.durationTick);
-            // Convert bars to Tone.js time string (e.g., "4n", "8n")
-            // Approximate: 1 bar = 4 beats, so durationBars * 4 = beats
-            // For simplicity, convert to quarter notes: durationBars * 4 + "n"
-            const noteDuration = `${Math.max(1, Math.round(noteDurationBars * 4))}n`;
+            // Convert bars to Tone.js time string using 'm' (measures/bars)
+            // This preserves the exact duration including sustained notes
+            const noteDuration = noteDurationBars > 0 ? `${noteDurationBars}m` : '8n';
             
             const event = new Tone.ToneEvent((time) => {
               // Use playNote which handles SoundFont instruments correctly
