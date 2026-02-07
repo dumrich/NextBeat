@@ -7,14 +7,16 @@ import { getInstrumentName, type InstrumentId } from '@/utils/instruments';
 import type { Track } from '@/types/project';
 
 const INSTRUMENT_OPTIONS: { id: InstrumentId; label: string }[] = [
-  { id: 'piano', label: 'Piano' },
-  { id: 'synth', label: 'Synthesizer' },
-  { id: 'bass', label: 'Bass' },
-  { id: 'guitar', label: 'Guitar' },
-  { id: 'strings', label: 'Strings' },
-  { id: 'brass', label: 'Brass' },
-  { id: 'drums', label: 'Drum Kit' },
-  { id: 'percussion', label: 'Percussion' },
+  { id: 'piano', label: 'Acoustic Grand Piano' },
+  { id: 'synth', label: 'Square Lead Synth' },
+  { id: 'bass', label: 'Acoustic Bass' },
+  { id: 'guitar', label: 'Nylon Guitar' },
+  { id: 'strings', label: 'String Ensemble' },
+  { id: 'brass', label: 'Trumpet' },
+  { id: 'flute', label: 'Flute' },
+  { id: 'drums', label: 'Woodblock' },
+  { id: 'percussion', label: 'Melodic Toms' },
+  { id: 'gunshot', label: 'Gunshot' },
 ];
 
 interface TrackSettingsModalProps {

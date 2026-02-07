@@ -15,6 +15,8 @@ interface ProjectState {
   metronomeEnabled: boolean;
   snapGrid: string; // e.g., '1/4', '1/8', '1/16', '1/32'
   songLength: number; // number of measures/bars in the song
+  history: Project[]; // History of project states for undo/redo
+  historyIndex: number; // Current position in history
   
   // Actions
   setProject: (project: Project) => void;
@@ -82,6 +84,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   metronomeEnabled: false,
   snapGrid: '1/4',
   songLength: 8,
+  history: [],
+  historyIndex: -1,
   
   setProject: (project) => {
     const firstTrackId = project.tracks.length > 0 ? project.tracks[0].id : null;

@@ -4,6 +4,9 @@ import { useProjectStore } from '@/stores/projectStore';
 import { Tool } from '@/types/project';
 import { useState, useRef, useEffect } from 'react';
 import { useInstruments } from '@/hooks/useInstruments';
+import { getInstrumentName } from '@/utils/instruments';
+import { Settings } from 'lucide-react';
+import TrackSettingsModal from './TrackSettingsMenu';
 
 const NOTES = [
   'C7',
@@ -59,11 +62,13 @@ export default function PianoRollView() {
   const [originalNotesPositions, setOriginalNotesPositions] = useState<Map<number, { pitch: number; startTick: number }>>(new Map());
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
   const [velocityEditNote, setVelocityEditNote] = useState<{ index: number; velocity: number } | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
   // Sustained note creation state
   const [isCreatingSustainedNote, setIsCreatingSustainedNote] = useState(false);
   const [sustainedNoteStartTick, setSustainedNoteStartTick] = useState<number | null>(null);
   const [sustainedNoteIndex, setSustainedNoteIndex] = useState<number | null>(null); // Index in clip.notes array
+  const isCreatingSustainedNoteRef = useRef(false); // Ref for immediate access
   
   // Box selection state
   const [isBoxSelecting, setIsBoxSelecting] = useState(false);
@@ -413,6 +418,7 @@ export default function PianoRollView() {
       
       // Start tracking for potential extended sustained note creation
       if (newNoteIndex !== null) {
+        isCreatingSustainedNoteRef.current = true; // Set ref immediately
         setIsCreatingSustainedNote(true);
         setSustainedNoteStartTick(tick);
         setSustainedNoteIndex(newNoteIndex);
@@ -435,7 +441,7 @@ export default function PianoRollView() {
     }
     
     // Handle sustained note extension in draw mode
-    if (selectedTool === 'draw' && isCreatingSustainedNote && sustainedNoteIndex !== null && sustainedNoteStartTick !== null && activeClip) {
+    if (selectedTool === 'draw' && isCreatingSustainedNoteRef.current && sustainedNoteIndex !== null && sustainedNoteStartTick !== null && activeClip && gridRef.current) {
       const rect = gridRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
       
@@ -514,7 +520,7 @@ export default function PianoRollView() {
 
     // Only process if we haven't already processed this cell
     // Skip continuous drawing when creating a sustained note
-    if (cellKey !== lastProcessedCell && !isCreatingSustainedNote) {
+    if (cellKey !== lastProcessedCell && !isCreatingSustainedNoteRef.current) {
       setLastProcessedCell(cellKey);
 
       // Play note preview when drawing (not erasing) and only if note doesn't exist
@@ -669,6 +675,7 @@ export default function PianoRollView() {
     dragPositionRef.current = null;
     
     // Reset sustained note creation state
+    isCreatingSustainedNoteRef.current = false; // Reset ref immediately
     setIsCreatingSustainedNote(false);
     setSustainedNoteStartTick(null);
     setSustainedNoteIndex(null);
@@ -698,8 +705,26 @@ export default function PianoRollView() {
     <div className="h-full bg-black flex flex-col">
       {/* Toolbar */}
       <div className="h-10 bg-zinc-900 border-b border-zinc-700 flex items-center gap-2 px-4 flex-shrink-0">
-        <div className="flex-1 text-sm text-zinc-400">
-          {selectedTrack ? `Editing: ${selectedTrack.name}` : 'No track selected'}
+        <div className="flex-1 flex items-center gap-2">
+          {selectedTrack ? (
+            <>
+              <div
+                className="w-3 h-3 rounded flex-shrink-0"
+                style={{ backgroundColor: selectedTrack.color }}
+              />
+              <span className="text-sm text-white font-medium">{selectedTrack.name}</span>
+              <span className="text-xs text-zinc-500">{getInstrumentName(selectedTrack.instrument)}</span>
+              <button
+                onClick={() => setIsSettingsOpen(true)}
+                className="text-zinc-400 hover:text-white transition p-0.5"
+                title="Track Settings"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </button>
+            </>
+          ) : (
+            <span className="text-sm text-zinc-400">No track selected</span>
+          )}
         </div>
         {TOOLS.map((tool) => (
           <button key={tool} className={`px-3 py-1 rounded text-sm ${
@@ -997,6 +1022,12 @@ export default function PianoRollView() {
           </div>
         </div>
       )}
+
+      <TrackSettingsModal
+        isOpen={isSettingsOpen}
+        track={selectedTrack || null}
+        onClose={() => setIsSettingsOpen(false)}
+      />
     </div>
   );
 }

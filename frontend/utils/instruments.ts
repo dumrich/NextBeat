@@ -1,7 +1,7 @@
 import * as Tone from 'tone';
 import { loadSoundfontInstrument, getSoundfontNameFromProgram, SoundfontInstrument } from './soundfont';
 
-export type InstrumentId = 'piano' | 'synth' | 'bass' | 'guitar' | 'strings' | 'brass' | 'drums' | 'percussion' | 'automation';
+export type InstrumentId = 'piano' | 'synth' | 'bass' | 'guitar' | 'strings' | 'brass' | 'flute' | 'drums' | 'percussion' | 'gunshot' | 'automation';
 
 // Map InstrumentId to MIDI program numbers (General MIDI)
 const INSTRUMENT_TO_MIDI_PROGRAM: Record<InstrumentId, number> = {
@@ -11,8 +11,10 @@ const INSTRUMENT_TO_MIDI_PROGRAM: Record<InstrumentId, number> = {
   guitar: 24,      // Acoustic Guitar (nylon)
   strings: 48,     // String Ensemble 1
   brass: 56,       // Trumpet
-  drums: 0,       // Drums use channel 10 in MIDI, but we'll use program 0 as fallback
-  percussion: 112, // Tinkle Bell (percussive)
+  flute: 73,       // Flute
+  drums: 115,      // Woodblock (sharp percussive click - hi-hat-like)
+  percussion: 117, // Melodic Tom (tom drum sounds)
+  gunshot: 127,    // Gunshot (sound effect)
   automation: 0,   // Automation tracks don't need sound
 };
 
@@ -32,7 +34,7 @@ export function getSoundfontInstrumentName(instrument: string | null, midiProgra
   }
   
   // If midiProgram is provided, use it directly
-  if (midiProgram !== undefined) {
+  if (midiProgram !== undefined && midiProgram >= 0) {
     return getSoundfontNameFromProgram(midiProgram);
   }
   
@@ -45,7 +47,9 @@ export function getSoundfontInstrumentName(instrument: string | null, midiProgra
   // If it's a known InstrumentId, map it to MIDI program number
   if (instrument && instrument in INSTRUMENT_TO_MIDI_PROGRAM) {
     const program = INSTRUMENT_TO_MIDI_PROGRAM[instrument as InstrumentId];
-    return getSoundfontNameFromProgram(program);
+    if (program >= 0) {
+      return getSoundfontNameFromProgram(program);
+    }
   }
   
   return null;
@@ -295,6 +299,20 @@ export function createToneInstrument(instrumentId: InstrumentId): Tone.ToneAudio
         octaves: 1.5,
       }).toDestination();
 
+    case 'gunshot':
+      // Gunshot using NoiseSynth for percussive burst
+      return new Tone.NoiseSynth({
+        noise: {
+          type: 'white',
+        },
+        envelope: {
+          attack: 0.001,
+          decay: 0.05,
+          sustain: 0,
+          release: 0.1,
+        },
+      }).toDestination();
+
     case 'automation':
       // Automation tracks don't need sound, but we'll provide a simple synth
       // Wrap in PolySynth for polyphonic playback
@@ -345,14 +363,16 @@ export function getInstrumentName(instrumentId: InstrumentId | string | null): s
   
   // Handle regular InstrumentId
   const names: Record<InstrumentId, string> = {
-    piano: 'Piano',
-    synth: 'Synthesizer',
-    bass: 'Bass',
-    guitar: 'Guitar',
-    strings: 'Strings',
-    brass: 'Brass',
-    drums: 'Drum Kit',
-    percussion: 'Percussion',
+    piano: 'Acoustic Grand Piano',
+    synth: 'Square Lead Synth',
+    bass: 'Acoustic Bass',
+    guitar: 'Nylon Guitar',
+    strings: 'String Ensemble',
+    brass: 'Trumpet',
+    flute: 'Flute',
+    drums: 'Woodblock',
+    percussion: 'Melodic Toms',
+    gunshot: 'Gunshot',
     automation: 'Automation',
   };
   
