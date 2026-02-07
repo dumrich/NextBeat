@@ -227,11 +227,16 @@ export default function PianoRollView() {
     );
     
     if (existingNoteIndex === -1) {
+      // Add slight velocity variation for more natural sound (85-110)
+      const baseVelocity = 95;
+      const variation = Math.random() * 25 - 10; // ±10 with bias toward higher
+      const velocity = Math.round(Math.max(85, Math.min(110, baseVelocity + variation)));
+      
       const newNote = {
         pitch,
         startTick: tick,
         durationTick: noteDuration,
-        velocity: 100,
+        velocity,
         channel: 0,
       };
       

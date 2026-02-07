@@ -50,6 +50,43 @@ export function getSoundfontNameFromProgram(program: number): string {
 }
 
 // SoundFont instrument wrapper that works with Tone.js
+// Global reverb for all instruments (shared for efficiency)
+let globalReverb: ConvolverNode | null = null;
+let globalReverbGain: GainNode | null = null;
+
+// Initialize global reverb (called once)
+async function initGlobalReverb(audioContext: AudioContext): Promise<void> {
+  if (globalReverb) return; // Already initialized
+  
+  try {
+    // Create reverb using convolver with impulse response
+    globalReverb = audioContext.createConvolver();
+    globalReverbGain = audioContext.createGain();
+    globalReverbGain.gain.value = 0.25; // 25% wet signal
+    
+    // Create simple algorithmic reverb impulse (2 second decay)
+    const sampleRate = audioContext.sampleRate;
+    const length = sampleRate * 2; // 2 second reverb
+    const impulse = audioContext.createBuffer(2, length, sampleRate);
+    
+    for (let channel = 0; channel < 2; channel++) {
+      const channelData = impulse.getChannelData(channel);
+      for (let i = 0; i < length; i++) {
+        // Exponential decay with noise
+        channelData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2);
+      }
+    }
+    
+    globalReverb.buffer = impulse;
+    globalReverb.connect(globalReverbGain);
+    globalReverbGain.connect(audioContext.destination);
+  } catch (e) {
+    // Reverb failed, continue without it
+    globalReverb = null;
+    globalReverbGain = null;
+  }
+}
+
 export class SoundfontInstrument {
   private audioContext: AudioContext;
   private soundfontPlayer: any; // soundfont-player Player object
@@ -61,6 +98,9 @@ export class SoundfontInstrument {
     this.audioContext = audioContext;
     this.soundfontPlayer = soundfontPlayer;
     this.gainNode = audioContext.createGain();
+    
+    // Initialize global reverb on first instrument creation
+    initGlobalReverb(audioContext);
     
     // Connect the soundfont player's output through our gain node
     if (soundfontPlayer.out) {
@@ -80,7 +120,11 @@ export class SoundfontInstrument {
       soundfontPlayer.connect(this.gainNode);
     }
     
+    // Connect to both dry output and reverb send
     this.gainNode.connect(audioContext.destination);
+    if (globalReverb) {
+      this.gainNode.connect(globalReverb);
+    }
     this.gainNode.gain.value = this.volume;
   }
 

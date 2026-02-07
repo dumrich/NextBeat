@@ -48,6 +48,28 @@ export function exportProjectToMidi(project: Project): Blob {
     const midiTrack = midi.addTrack();
     midiTrack.name = track.name;
     
+    // Add essential MIDI Control Changes for better playback in other programs
+    // CC 7: Channel Volume
+    midiTrack.addCC({
+      number: 7,
+      value: Math.round(track.volume * 127),
+      time: 0
+    });
+    
+    // CC 10: Pan (0=left, 64=center, 127=right)
+    midiTrack.addCC({
+      number: 10,
+      value: Math.round(((track.pan + 1) / 2) * 127), // Convert -1..1 to 0..127
+      time: 0
+    });
+    
+    // CC 11: Expression (subtle dynamics for more natural sound)
+    midiTrack.addCC({
+      number: 11,
+      value: 100,
+      time: 0
+    });
+    
     // Process all arrangement clips for this track
     clips.forEach((arrClip) => {
       if (arrClip.clipType === 'midi') {
