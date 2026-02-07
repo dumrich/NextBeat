@@ -19,7 +19,7 @@ export default function TransportBar() {
   } = useProjectStore();
 
   // Initialize playback system
-  usePlayback(project, isPlaying, project?.tempo || 120, snapGrid, setPlayheadPosition);
+  usePlayback(project, isPlaying, project?.tempo || 120, setPlayheadPosition);
 
   const handlePlayPause = async () => {
     if (!isPlaying) {

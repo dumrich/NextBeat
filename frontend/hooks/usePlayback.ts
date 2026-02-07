@@ -22,19 +22,10 @@ function velocityToGain(velocity: number): number {
   return velocity / 127;
 }
 
-// Snap grid to fraction mapping
-const SNAPGRID_TO_FRACTION: { [key: string]: number } = {
-  '1/4': 4,
-  '1/8': 8,
-  '1/16': 16,
-  '1/32': 32,
-};
-
 export function usePlayback(
   project: Project | null,
   isPlaying: boolean,
   tempo: number,
-  snapGrid: string,
   setPlayheadPosition: (position: number) => void
 ) {
   const { getSynthesizer } = useInstruments(project?.tracks || []);
@@ -91,10 +82,6 @@ export function usePlayback(
         });
       });
 
-      // Calculate snap grid step duration
-      const snapGridFraction = SNAPGRID_TO_FRACTION[snapGrid] || 16;
-      const duration = `${snapGridFraction}n`; // e.g., "16n" for 1/16, "8n" for 1/8, etc.
-
       // Group notes by start time (to handle chords)
       const notesByStartTime = new Map<number, MidiNote[]>();
       
@@ -139,12 +126,18 @@ export function usePlayback(
         const hasDifferentVelocities = notesAtTime.length > 1 && 
           notesAtTime.some(note => note.velocity !== notesAtTime[0].velocity);
         
-        if (playable instanceof Tone.PolySynth && notesAtTime.length > 1 && !hasDifferentVelocities) {
-          // Play chord: all notes have same velocity, so we can play them together
+        // Check if all notes have the same duration (for chord playback)
+        const hasDifferentDurations = notesAtTime.length > 1 &&
+          notesAtTime.some(note => note.durationTick !== notesAtTime[0].durationTick);
+        
+        if (playable instanceof Tone.PolySynth && notesAtTime.length > 1 && !hasDifferentVelocities && !hasDifferentDurations) {
+          // Play chord: all notes have same velocity and duration, so we can play them together
           const noteNames = notesAtTime.map(note => midiToNoteName(note.pitch));
           
-          // All notes have the same velocity, so use that
+          // All notes have the same velocity and duration
           const noteVelocity = notesAtTime[0].velocity;
+          const noteDurationBars = ticksToBars(notesAtTime[0].durationTick);
+          
           // Combine note velocity (0-127) with track volume (0-1)
           // Final gain = (note.velocity / 127) * track.volume
           const combinedGain = (noteVelocity / 127) * baseTrackVolume;
@@ -154,15 +147,16 @@ export function usePlayback(
             // Set volume for this chord based on combined velocity
             // Note: This affects all voices, but since all notes in chord have same velocity, it's OK
             playable.volume.value = velocityDb;
-            playable.triggerAttackRelease(noteNames, duration, time);
+            playable.triggerAttackRelease(noteNames, noteDurationBars, time);
           });
           
           event.start(adjustedStartBars);
           scheduledEventsRef.current.push(event);
         } else {
-          // Play individual notes (different velocities in chord, or single notes, or non-PolySynth)
+          // Play individual notes (different velocities/durations in chord, or single notes, or non-PolySynth)
           notesAtTime.forEach((note) => {
             const noteName = midiToNoteName(note.pitch);
+            const noteDurationBars = ticksToBars(note.durationTick);
             
             // Combine note velocity (0-127) with track volume (0-1)
             // Final gain = (note.velocity / 127) * track.volume
@@ -174,7 +168,7 @@ export function usePlayback(
               // Note: For PolySynth, this affects all voices, so chords with different velocities
               // will be played individually (handled above)
               playable.volume.value = velocityDb;
-              playable.triggerAttackRelease(noteName, duration, time);
+              playable.triggerAttackRelease(noteName, noteDurationBars, time);
             });
             
             event.start(adjustedStartBars);
@@ -240,7 +234,7 @@ export function usePlayback(
       scheduledEventsRef.current.forEach((event) => event.dispose());
       scheduledEventsRef.current = [];
     };
-  }, [isPlaying, project, tempo, snapGrid]);
+  }, [isPlaying, project, tempo]);
 
   return {
     scheduleNotes,

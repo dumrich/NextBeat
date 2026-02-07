@@ -54,6 +54,12 @@ export default function PianoRollView() {
   const [originalNotePosition, setOriginalNotePosition] = useState<{ pitch: number; startTick: number } | null>(null);
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
   const [velocityEditNote, setVelocityEditNote] = useState<{ index: number; velocity: number } | null>(null);
+  
+  // Sustained note creation state
+  const [isCreatingSustainedNote, setIsCreatingSustainedNote] = useState(false);
+  const [sustainedNoteStartTick, setSustainedNoteStartTick] = useState<number | null>(null);
+  const [sustainedNoteIndex, setSustainedNoteIndex] = useState<number | null>(null); // Index in clip.notes array
+  
   const gridRef = useRef<HTMLDivElement>(null);
   const dragPositionRef = useRef<{ x: number; y: number } | null>(null);
   const { playNote } = useInstruments(project?.tracks || []);
@@ -162,19 +168,19 @@ export default function PianoRollView() {
   };
 
   // Add note at a specific position
-  const addNoteAtPosition = (noteIndex: number, tick: number) => {
+  const addNoteAtPosition = (noteIndex: number, tick: number, duration?: number) => {
     const clip = ensureActiveClip();
-    if (!clip) return;
+    if (!clip) return null;
 
     const pitch = NOTE_TO_MIDI[NOTES[noteIndex]];
-    const noteDuration = ticksPerStep; // One grid step duration
+    const noteDuration = duration || ticksPerStep; // One grid step duration by default
     
     // Check if note already exists at this exact position
-    const existingNote = clip.notes.find(
+    const existingNoteIndex = clip.notes.findIndex(
       (n) => n.pitch === pitch && Math.abs(n.startTick - tick) < ticksPerStep / 2
     );
     
-    if (!existingNote) {
+    if (existingNoteIndex === -1) {
       const newNote = {
         pitch,
         startTick: tick,
@@ -186,7 +192,12 @@ export default function PianoRollView() {
       updateMidiClip(clip.id, {
         notes: [...clip.notes, newNote],
       });
+      
+      // Return the index where the note will be added
+      return clip.notes.length;
     }
+    
+    return null;
   };
 
   // Remove note at a specific position
@@ -196,9 +207,15 @@ export default function PianoRollView() {
 
     const pitch = NOTE_TO_MIDI[NOTES[noteIndex]];
     
-    // Find and remove notes at this position
+    // Find and remove notes where the clicked position falls within the note's duration
     const updatedNotes = clip.notes.filter(
-      (n) => !(n.pitch === pitch && Math.abs(n.startTick - tick) < ticksPerStep / 2)
+      (n) => {
+        if (n.pitch !== pitch) return true;
+        // Check if tick falls within the note's duration range
+        const noteStart = n.startTick;
+        const noteEnd = n.startTick + n.durationTick;
+        return !(tick >= noteStart && tick < noteEnd);
+      }
     );
     
     if (updatedNotes.length !== clip.notes.length) {
@@ -313,7 +330,16 @@ export default function PianoRollView() {
     setLastProcessedCell(cellKey);
 
     if (selectedTool === 'draw') {
-      addNoteAtPosition(noteIndex, tick);
+      // Create a sustained note (full grid step duration)
+      const sustainedDuration = ticksPerStep;
+      const newNoteIndex = addNoteAtPosition(noteIndex, tick, sustainedDuration);
+      
+      // Start tracking for potential extended sustained note creation
+      if (newNoteIndex !== null) {
+        setIsCreatingSustainedNote(true);
+        setSustainedNoteStartTick(tick);
+        setSustainedNoteIndex(newNoteIndex);
+      }
     } else if (selectedTool === 'erase') {
       removeNoteAtPosition(noteIndex, tick);
     }
@@ -321,6 +347,35 @@ export default function PianoRollView() {
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging || !gridRef.current || !selectedTrack || !selectedTrackId) return;
+    
+    // Handle sustained note extension in draw mode
+    if (selectedTool === 'draw' && isCreatingSustainedNote && sustainedNoteIndex !== null && sustainedNoteStartTick !== null && activeClip) {
+      const rect = gridRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      
+      // Calculate current tick position
+      const stepIndex = Math.floor(x / pixelsPerBar);
+      const currentTick = (stepIndex * ticksPerBar) / SNAPGRID_TO_FRACTION[snapGrid];
+      
+      // Calculate duration from start to current position
+      let newDuration = currentTick - sustainedNoteStartTick + ticksPerStep;
+      
+      // Ensure minimum duration (one full step)
+      const minDuration = ticksPerStep;
+      newDuration = Math.max(minDuration, newDuration);
+      
+      // Update the note's duration
+      const updatedNotes = [...activeClip.notes];
+      if (updatedNotes[sustainedNoteIndex]) {
+        updatedNotes[sustainedNoteIndex] = {
+          ...updatedNotes[sustainedNoteIndex],
+          durationTick: newDuration,
+        };
+        updateMidiClip(activeClip.id, { notes: updatedNotes });
+      }
+      
+      return;
+    }
     
     // Handle note dragging in select mode - free movement (NO grid snapping during drag)
     if (selectedTool === 'select' && draggedNoteIndex !== null && activeClip && dragOffset) {
@@ -372,7 +427,8 @@ export default function PianoRollView() {
     const cellKey = getCellKey(noteIndex, tick);
 
     // Only process if we haven't already processed this cell
-    if (cellKey !== lastProcessedCell) {
+    // Skip continuous drawing when creating a sustained note
+    if (cellKey !== lastProcessedCell && !isCreatingSustainedNote) {
       setLastProcessedCell(cellKey);
 
       // Play note preview when drawing (not erasing) and only if note doesn't exist
@@ -440,6 +496,7 @@ export default function PianoRollView() {
       }
     }
     
+    // Reset all dragging and sustained note states
     setIsDragging(false);
     setLastProcessedCell(null);
     setDraggedNoteIndex(null);
@@ -447,6 +504,11 @@ export default function PianoRollView() {
     setOriginalNotePosition(null);
     setDragPosition(null);
     dragPositionRef.current = null;
+    
+    // Reset sustained note creation state
+    setIsCreatingSustainedNote(false);
+    setSustainedNoteStartTick(null);
+    setSustainedNoteIndex(null);
   };
 
   // Handle velocity update
