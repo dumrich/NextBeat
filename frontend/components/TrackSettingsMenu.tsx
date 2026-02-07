@@ -54,7 +54,7 @@ export default function TrackSettingsModal({ isOpen, track, onClose }: TrackSett
   };
 
   const handleVelocityChange = (newVelocity: number) => {
-    const clampedVelocity = Math.max(0, Math.min(100, newVelocity));
+    const clampedVelocity = Math.max(0, Math.min(200, newVelocity));
     setVelocity(clampedVelocity);
     updateTrack(track.id, { volume: clampedVelocity / 100 });
   };
@@ -157,7 +157,7 @@ export default function TrackSettingsModal({ isOpen, track, onClose }: TrackSett
             <input
               type="range"
               min="0"
-              max="100"
+              max="200"
               value={velocity}
               onChange={(e) => handleVelocityChange(parseInt(e.target.value))}
               className="w-full"
