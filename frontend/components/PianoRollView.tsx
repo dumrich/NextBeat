@@ -70,6 +70,12 @@ export default function PianoRollView() {
   const totalNotesHeight = NOTES.length * noteHeight;
   const ticksPerStep = ticksPerBar / SNAPGRID_TO_FRACTION[snapGrid];
 
+  // Handle erasing all notes
+  const handleEraseAll = () => {
+    if (!activeClip) return;
+    updateMidiClip(activeClip.id, { notes: [] });
+  };
+
   // Ensure we have a clip to work with
   const ensureActiveClip = () => {
     if (!selectedTrack) return null;
@@ -277,6 +283,13 @@ export default function PianoRollView() {
           {tool.charAt(0).toUpperCase() + tool.slice(1)}
         </button>
         ))}
+        <button 
+          className="px-3 py-1 rounded text-sm bg-red-900 hover:bg-red-800 text-zinc-100 ml-2"
+          onClick={handleEraseAll}
+          disabled={!activeClip || activeClip.notes.length === 0}
+        >
+          Erase All
+        </button>
       </div>
 
       {/* Piano Roll Grid */}
