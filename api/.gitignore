@@ -1,0 +1,37 @@
+# Python virtual environment
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Magenta model checkpoints (large binary files)
+models/
+*.mag
+
+# Generated MIDI output
+output/
+
+# OS
+.DS_Store
+Thumbs.db
