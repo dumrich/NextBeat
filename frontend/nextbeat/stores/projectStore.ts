@@ -13,6 +13,8 @@ interface ProjectState {
   isPlaying: boolean;
   isRecording: boolean;
   metronomeEnabled: boolean;
+  snapGrid: string; // e.g., '1/4', '1/8', '1/16', '1/32'
+  songLength: number; // number of measures/bars in the song
   
   // Actions
   setProject: (project: Project) => void;
@@ -25,6 +27,8 @@ interface ProjectState {
   setIsPlaying: (playing: boolean) => void;
   setIsRecording: (recording: boolean) => void;
   setMetronomeEnabled: (enabled: boolean) => void;
+  setSnapGrid: (snapGrid: string) => void;
+  setSongLength: (length: number) => void;
   
   // Project mutations
   addTrack: (track: Track) => void;
@@ -70,6 +74,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isPlaying: false,
   isRecording: false,
   metronomeEnabled: false,
+  snapGrid: '1/4',
+  songLength: 8,
   
   setProject: (project) => {
     const firstTrackId = project.tracks.length > 0 ? project.tracks[0].id : null;
@@ -84,6 +90,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setIsPlaying: (playing) => set({ isPlaying: playing }),
   setIsRecording: (recording) => set({ isRecording: recording }),
   setMetronomeEnabled: (enabled) => set({ metronomeEnabled: enabled }),
+  setSnapGrid: (snapGrid) => set({ snapGrid }),
+  setSongLength: (length) => set({ songLength: length }),
   
   addTrack: (track) => set((state) => {
     if (!state.project) return state;

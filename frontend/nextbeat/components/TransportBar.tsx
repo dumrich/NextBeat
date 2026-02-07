@@ -10,11 +10,15 @@ export default function TransportBar() {
     isRecording,
     metronomeEnabled,
     playheadPosition,
+    snapGrid,
+    songLength,
     setTempo,
     setIsPlaying,
     setIsRecording,
     setMetronomeEnabled,
     setPlayheadPosition,
+    setSnapGrid,
+    setSongLength,
   } = useProjectStore();
 
   const handlePlayPause = async () => {
@@ -135,12 +139,34 @@ export default function TransportBar() {
 
       {/* Snap/Grid */}
       <div className="flex items-center gap-2">
-        <select className="px-2 py-1 bg-zinc-900 border border-zinc-700 rounded text-white text-sm">
-          <option>1/4</option>
-          <option>1/8</option>
-          <option>1/16</option>
-          <option>1/32</option>
+        <select 
+          value={snapGrid}
+          onChange={(e) => setSnapGrid(e.target.value)}
+          className="px-2 py-1 bg-zinc-900 border border-zinc-700 rounded text-white text-sm"
+        >
+          <option value="1/4">1/4</option>
+          <option value="1/8">1/8</option>
+          <option value="1/16">1/16</option>
+          <option value="1/32">1/32</option>
         </select>
+      </div>
+
+      {/* Song Length */}
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-zinc-400">Bars</label>
+        <input
+          type="number"
+          value={songLength}
+          onChange={(e) => {
+            const length = parseInt(e.target.value);
+            if (!isNaN(length) && length > 0 && length <= 512) {
+              setSongLength(length);
+            }
+          }}
+          className="w-20 px-2 py-1 bg-zinc-900 border border-zinc-700 rounded text-white text-sm"
+          min="1"
+          max="512"
+        />
       </div>
 
       {/* Undo/Redo */}

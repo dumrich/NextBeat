@@ -32,7 +32,7 @@ export default function MainWorkspace() {
 
   return (
     <>
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden h-full">
         {/* View Tabs */}
         <div className="h-10 bg-zinc-900 border-b border-zinc-700 flex items-center gap-1 px-2 flex-shrink-0">
           <ViewTab view="playlist" label="Playlist" />
