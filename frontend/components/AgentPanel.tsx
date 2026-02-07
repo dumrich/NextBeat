@@ -16,11 +16,11 @@ export default function AgentPanel() {
   const [suggestions, setSuggestions] = useState<any[]>([]);
 
   const quickPrompts = [
+    'Create a full beat',
     'Add drums',
-    'Reharmonize',
-    'Make it darker',
-    'Humanize',
+    'Add bass and piano',
     'Build a drop',
+    'Humanize',
   ];
 
   const handleSend = async () => {
@@ -31,8 +31,10 @@ export default function AgentPanel() {
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setIsLoading(true);
 
+    const songLength = useProjectStore.getState().songLength;
+
     try {
-      const response = await agentClient.sendMessage(project, userMessage);
+      const response = await agentClient.sendMessage(project, userMessage, { songLength });
       setMessages((prev) => [...prev, { role: 'assistant', content: response.message, edits: response.proposedEdits }]);
       
       if (response.proposedEdits) {
@@ -66,8 +68,11 @@ export default function AgentPanel() {
           id: `channel-${timestamp}-${random}-${idx}`,
         })),
       });
-      // Also create an arrangement clip for the pattern
-      const trackId = project.tracks[0]?.id;
+      // Place pattern on track by name (e.g. "Drums"), or first drums track, or first track
+      const trackId =
+        (edit.data.trackName && project.tracks.find((t) => t.name === edit.data.trackName)?.id) ||
+        project.tracks.find((t) => t.type === 'drums')?.id ||
+        project.tracks[0]?.id;
       if (trackId) {
         addArrangementClip({
           id: `arr-${timestamp}-${random}`,
@@ -86,7 +91,7 @@ export default function AgentPanel() {
         color: edit.data.color || '#3b82f6',
         type: edit.data.type || 'instrument',
         channelRackIds: [],
-        instrument: null,
+        instrument: edit.data.instrument ?? null,
         mixerChannelId: null,
         mute: false,
         solo: false,

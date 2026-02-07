@@ -1,6 +1,11 @@
-// Mock Agent Client for AI-assisted MIDI production
+// Agent Client for AI-assisted MIDI production — calls backend LLM
 
 import type { Project } from '@/types/project';
+
+const AGENT_API_URL =
+  typeof process !== 'undefined' && process.env.NEXT_PUBLIC_AGENT_API_URL
+    ? process.env.NEXT_PUBLIC_AGENT_API_URL
+    : 'http://localhost:3001';
 
 export type AgentResponse = {
   message: string;
@@ -20,111 +25,58 @@ export type Suggestion = {
   data: any;
 };
 
+export type AgentSendOptions = {
+  /** Total song length in bars; helps the agent generate for the full timeline. */
+  songLength?: number;
+  /** Generate only for this section (e.g. for chunked long songs). */
+  startBar?: number;
+  lengthBars?: number;
+};
+
 export const agentClient = {
-  async sendMessage(projectSnapshot: Project, userMessage: string): Promise<AgentResponse> {
-    // Mock delay
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    
-    const lowerMessage = userMessage.toLowerCase();
-    
-    // Mock responses based on keywords
-    if (lowerMessage.includes('drum') || lowerMessage.includes('groove')) {
+  async sendMessage(
+    projectSnapshot: Project,
+    userMessage: string,
+    options?: AgentSendOptions
+  ): Promise<AgentResponse> {
+    try {
+      const body: Record<string, unknown> = {
+        projectSnapshot,
+        message: userMessage,
+      };
+      if (options?.songLength != null) body.songLength = options.songLength;
+      if (options?.startBar != null && options?.lengthBars != null) {
+        body.startBar = options.startBar;
+        body.lengthBars = options.lengthBars;
+      }
+      const res = await fetch(`${AGENT_API_URL}/api/agent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const errBody = await res.text();
+        throw new Error(res.status === 500 ? errBody : `Agent API error: ${res.status}`);
+      }
+
+      const data = (await res.json()) as AgentResponse;
       return {
-        message: "I can add a chill drum groove to your project. Here's what I'll create:",
-        proposedEdits: [
-          {
-            type: 'addPattern',
-            description: 'Add drum pattern with kick, snare, and hi-hat',
-            data: {
-              name: 'Chill Groove',
-              steps: 16,
-              channels: [
-                {
-                  id: 'kick',
-                  name: 'Kick',
-                  steps: [true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false],
-                  volume: 0.9,
-                  pan: 0,
-                  mute: false,
-                  solo: false,
-                },
-                {
-                  id: 'snare',
-                  name: 'Snare',
-                  steps: [false, false, false, false, true, false, false, false, false, false, false, false, true, false, false, false],
-                  volume: 0.8,
-                  pan: 0,
-                  mute: false,
-                  solo: false,
-                },
-                {
-                  id: 'hat',
-                  name: 'Hi-Hat',
-                  steps: [false, true, false, true, false, true, false, true, false, true, false, true, false, true, false, true],
-                  volume: 0.6,
-                  pan: 0,
-                  mute: false,
-                  solo: false,
-                },
-              ],
-            },
-          },
-        ],
+        message: data.message ?? 'Done.',
+        proposedEdits: data.proposedEdits,
+        suggestions: data.suggestions,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Request failed';
+      return {
+        message: `Could not reach the agent. ${message} Make sure the backend is running (npm run dev in backend/) and OPENAI_API_KEY is set in backend/.env`,
+        proposedEdits: [],
       };
     }
-    
-    if (lowerMessage.includes('bass') || lowerMessage.includes('bassline')) {
-      return {
-        message: "I'll create a simple bassline that complements your track.",
-        proposedEdits: [
-          {
-            type: 'addTrack',
-            description: 'Create Bass track',
-            data: {
-              name: 'Bass',
-              color: '#10b981',
-              type: 'instrument',
-            },
-          },
-          {
-            type: 'addClip',
-            description: 'Add bassline MIDI clip',
-            data: {
-              trackName: 'Bass',
-              startBar: 0,
-              lengthBars: 4,
-              notes: [
-                { pitch: 36, startTick: 0, durationTick: 480, velocity: 100, channel: 0 },
-                { pitch: 36, startTick: 960, durationTick: 480, velocity: 100, channel: 0 },
-                { pitch: 38, startTick: 1920, durationTick: 480, velocity: 100, channel: 0 },
-                { pitch: 36, startTick: 2880, durationTick: 480, velocity: 100, channel: 0 },
-              ],
-            },
-          },
-        ],
-      };
-    }
-    
-    if (lowerMessage.includes('chord') || lowerMessage.includes('progression')) {
-      return {
-        message: "I can add a chord progression. Here are some suggestions:",
-        suggestions: [
-          { type: 'chord', text: 'C major', data: { pitches: [60, 64, 67] } },
-          { type: 'chord', text: 'Am', data: { pitches: [57, 60, 64] } },
-          { type: 'chord', text: 'F major', data: { pitches: [53, 57, 60] } },
-          { type: 'chord', text: 'G major', data: { pitches: [55, 59, 62] } },
-        ],
-      };
-    }
-    
-    // Default response
-    return {
-      message: "I understand you want help with your project. I can help you add drums, basslines, chords, or other musical elements. What would you like to add?",
-    };
   },
-  
+
   async getAutocomplete(projectSnapshot: Project, cursorContext: any): Promise<Suggestion[]> {
-    // Mock autocomplete suggestions
+    // Still mock for now; can be wired to POST /api/autocomplete later
     return [
       { type: 'chord', text: 'Next chord: Dm9', data: { pitches: [50, 53, 57, 60, 64] } },
       { type: 'pattern', text: 'Hat pattern: swing 56%', data: { swing: 0.56 } },
