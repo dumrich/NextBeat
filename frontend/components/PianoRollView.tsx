@@ -3,6 +3,7 @@
 import { useProjectStore } from '@/stores/projectStore';
 import { Tool } from '@/types/project';
 import { useState, useRef, useEffect } from 'react';
+import { useInstruments } from '@/hooks/useInstruments';
 
 const NOTES = [
   'C7', 'B6', 'A#6', 'A6', 'G#6', 'G6', 'F#6', 'F6', 'E6', 'D#6', 'D6', 'C#6', 'C6',
@@ -46,6 +47,7 @@ export default function PianoRollView() {
   const [isDragging, setIsDragging] = useState(false);
   const [lastProcessedCell, setLastProcessedCell] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const { playNote } = useInstruments(project?.tracks || []);
 
   if (!project) return null;
 
@@ -168,7 +170,26 @@ export default function PianoRollView() {
   };
 
   const handleMouseDown = (noteIndex: number, tick: number) => {
-    if (!selectedTrack || (selectedTool !== 'draw' && selectedTool !== 'erase')) return;
+    if (!selectedTrack || !selectedTrackId) return;
+    
+    // Don't play note preview when erasing
+    if (selectedTool !== 'erase') {
+      // Check if there's already a note at this position
+      const pitch = NOTE_TO_MIDI[NOTES[noteIndex]];
+      const hasExistingNote = activeClip?.notes.some(
+        (n) => n.pitch === pitch && Math.abs(n.startTick - tick) < ticksPerStep / 2
+      );
+      
+      // Only play preview if there's no existing note
+      if (!hasExistingNote) {
+        const noteName = NOTES[noteIndex];
+        const snapGridFraction = SNAPGRID_TO_FRACTION[snapGrid];
+        const duration = `${snapGridFraction}n`; // e.g., "16n" for 1/16
+        playNote(selectedTrackId, noteName, duration);
+      }
+    }
+    
+    if (selectedTool !== 'draw' && selectedTool !== 'erase') return;
     
     setIsDragging(true);
     setLastProcessedCell(null);
@@ -187,7 +208,7 @@ export default function PianoRollView() {
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !gridRef.current || !selectedTrack) return;
+    if (!isDragging || !gridRef.current || !selectedTrack || !selectedTrackId) return;
     if (selectedTool !== 'draw' && selectedTool !== 'erase') return;
 
     const rect = gridRef.current.getBoundingClientRect();
@@ -210,7 +231,21 @@ export default function PianoRollView() {
     if (cellKey !== lastProcessedCell) {
       setLastProcessedCell(cellKey);
 
+      // Play note preview when drawing (not erasing) and only if note doesn't exist
       if (selectedTool === 'draw') {
+        const pitch = NOTE_TO_MIDI[NOTES[noteIndex]];
+        const hasExistingNote = activeClip?.notes.some(
+          (n) => n.pitch === pitch && Math.abs(n.startTick - tick) < ticksPerStep / 2
+        );
+        
+        // Only play preview if there's no existing note
+        if (!hasExistingNote) {
+          const noteName = NOTES[noteIndex];
+          const snapGridFraction = SNAPGRID_TO_FRACTION[snapGrid];
+          const duration = `${snapGridFraction}n`;
+          playNote(selectedTrackId, noteName, duration);
+        }
+        
         addNoteAtPosition(noteIndex, tick);
       } else if (selectedTool === 'erase') {
         removeNoteAtPosition(noteIndex, tick);
