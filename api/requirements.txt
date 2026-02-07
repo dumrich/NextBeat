@@ -1,25 +1,6 @@
-# NextBeat Backend Dependencies
-# Install with: pip install -r requirements.txt
-
-# Web framework
-fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
-
-# Configuration
-pydantic>=2.5.3
-pydantic-settings>=2.1.0
-python-dotenv>=1.0.0
-
-# Claude API
-anthropic>=0.40.0
-
-# Magenta for music generation
-# Note: magenta requires tensorflow. On Apple Silicon, use tensorflow-macos.
-# If you have issues installing magenta, install note-seq separately:
-#   pip install note-seq
-magenta>=2.1.4
-note-seq>=0.0.5
-
-# MIDI manipulation (included with note-seq but listed for clarity)
-pretty-midi>=0.2.10
-mido>=1.3.0
+fastapi
+uvicorn[standard]
+python-multipart
+basic-pitch
+coremltools
+onnxruntime
