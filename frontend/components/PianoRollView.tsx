@@ -56,6 +56,7 @@ export default function PianoRollView() {
   const [draggedNoteIndex, setDraggedNoteIndex] = useState<number | null>(null);
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null);
   const [originalNotePosition, setOriginalNotePosition] = useState<{ pitch: number; startTick: number } | null>(null);
+  const [originalNotesPositions, setOriginalNotesPositions] = useState<Map<number, { pitch: number; startTick: number }>>(new Map());
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
   const [velocityEditNote, setVelocityEditNote] = useState<{ index: number; velocity: number } | null>(null);
   
@@ -63,6 +64,11 @@ export default function PianoRollView() {
   const [isCreatingSustainedNote, setIsCreatingSustainedNote] = useState(false);
   const [sustainedNoteStartTick, setSustainedNoteStartTick] = useState<number | null>(null);
   const [sustainedNoteIndex, setSustainedNoteIndex] = useState<number | null>(null); // Index in clip.notes array
+  
+  // Box selection state
+  const [isBoxSelecting, setIsBoxSelecting] = useState(false);
+  const [boxSelectStart, setBoxSelectStart] = useState<{ x: number; y: number } | null>(null);
+  const [boxSelectEnd, setBoxSelectEnd] = useState<{ x: number; y: number } | null>(null);
   
   const gridRef = useRef<HTMLDivElement>(null);
   const dragPositionRef = useRef<{ x: number; y: number } | null>(null);
@@ -299,9 +305,24 @@ export default function PianoRollView() {
             setSelectedNoteIndices(new Set([foundNoteIndex]));
           }
           
+          // Store original positions for all selected notes
+          const originalPositions = new Map<number, { pitch: number; startTick: number }>();
+          selectedNoteIndices.forEach(index => {
+            const note = activeClip!.notes[index];
+            if (note) {
+              originalPositions.set(index, { pitch: note.pitch, startTick: note.startTick });
+            }
+          });
+          // Also add the clicked note if it wasn't already selected
+          if (!selectedNoteIndices.has(foundNoteIndex)) {
+            const note = activeClip!.notes[foundNoteIndex];
+            originalPositions.set(foundNoteIndex, { pitch: note.pitch, startTick: note.startTick });
+          }
+          setOriginalNotesPositions(originalPositions);
+          
           const note = activeClip!.notes[foundNoteIndex];
           
-          // Store original position for potential revert
+          // Store original position for the dragged note
           setOriginalNotePosition({
             pitch: note.pitch,
             startTick: note.startTick,
@@ -336,8 +357,19 @@ export default function PianoRollView() {
           setVelocityEditNote({ index: foundNoteIndex, velocity: note.velocity });
         }
       } else {
-        // Clicked on empty space - deselect all
-        setSelectedNoteIndices(new Set());
+        // Clicked on empty space - start box selection
+        if (e.button === 0) { // Left click
+          const rect = gridRef.current?.getBoundingClientRect();
+          if (rect) {
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            setIsBoxSelecting(true);
+            setBoxSelectStart({ x: mouseX, y: mouseY });
+            setBoxSelectEnd({ x: mouseX, y: mouseY });
+            setIsDragging(true);
+            setSelectedNoteIndices(new Set()); // Clear current selection
+          }
+        }
       }
       return;
     }
@@ -392,6 +424,15 @@ export default function PianoRollView() {
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging || !gridRef.current || !selectedTrack || !selectedTrackId) return;
+    
+    // Handle box selection in select mode
+    if (selectedTool === 'select' && isBoxSelecting && boxSelectStart) {
+      const rect = gridRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      setBoxSelectEnd({ x: mouseX, y: mouseY });
+      return;
+    }
     
     // Handle sustained note extension in draw mode
     if (selectedTool === 'draw' && isCreatingSustainedNote && sustainedNoteIndex !== null && sustainedNoteStartTick !== null && activeClip) {
@@ -504,9 +545,44 @@ export default function PianoRollView() {
 
     console.log('handleMouseUp', dragPosition);
     
+    // Handle box selection completion
+    if (selectedTool === 'select' && isBoxSelecting && boxSelectStart && boxSelectEnd && activeClip) {
+      // Calculate the bounding box
+      const minX = Math.min(boxSelectStart.x, boxSelectEnd.x);
+      const maxX = Math.max(boxSelectStart.x, boxSelectEnd.x);
+      const minY = Math.min(boxSelectStart.y, boxSelectEnd.y);
+      const maxY = Math.max(boxSelectStart.y, boxSelectEnd.y);
+      
+      // Find all notes within the box
+      const selectedIndices = new Set<number>();
+      activeClip.notes.forEach((note, index) => {
+        const noteNoteIndex = NOTES.findIndex((n) => NOTE_TO_MIDI[n] === note.pitch);
+        if (noteNoteIndex === -1) return;
+        
+        const stepPosition = note.startTick / ticksPerStep;
+        const noteX = stepPosition * pixelsPerBar;
+        const noteY = noteNoteIndex * noteHeight;
+        const noteWidth = (note.durationTick / ticksPerStep) * pixelsPerBar;
+        const noteEndX = noteX + noteWidth;
+        const noteEndY = noteY + noteHeight;
+        
+        // Check if note intersects with selection box
+        if (noteX < maxX && noteEndX > minX && noteY < maxY && noteEndY > minY) {
+          selectedIndices.add(index);
+        }
+      });
+      
+      setSelectedNoteIndices(selectedIndices);
+      setIsBoxSelecting(false);
+      setBoxSelectStart(null);
+      setBoxSelectEnd(null);
+      setIsDragging(false);
+      return;
+    }
+    
     // Handle note drop in select mode - snap to grid and check collisions
     if (selectedTool === 'select' && draggedNoteIndex !== null && activeClip && dragPosition && originalNotePosition) {
-      // Calculate snapped position
+      // Calculate snapped position for the dragged note
       const noteIndex = Math.max(0, Math.min(NOTES.length - 1, Math.floor(dragPosition.y / noteHeight)));
       const stepIndex = Math.max(0, Math.min(
         songLength * SNAPGRID_TO_FRACTION[snapGrid] - 1,
@@ -517,26 +593,61 @@ export default function PianoRollView() {
       const newTick = (stepIndex * ticksPerBar) / SNAPGRID_TO_FRACTION[snapGrid];
       const newPitch = NOTE_TO_MIDI[NOTES[noteIndex]];
       
-      // Check for collision with existing notes (excluding the dragged note)
-      const hasCollision = hasNoteAtPosition(newPitch, newTick, draggedNoteIndex);
+      // Calculate the delta movement
+      const pitchDelta = newPitch - originalNotePosition.pitch;
+      const tickDelta = newTick - originalNotePosition.startTick;
       
-      if (hasCollision) {
-        // Revert to original position
+      // Check for collisions for all selected notes
+      let hasAnyCollision = false;
+      const notesToMove = selectedNoteIndices.size > 0 ? selectedNoteIndices : new Set([draggedNoteIndex]);
+      
+      for (const index of notesToMove) {
+        const originalPos = originalNotesPositions.get(index);
+        if (!originalPos) continue;
+        
+        const targetPitch = originalPos.pitch + pitchDelta;
+        const targetTick = originalPos.startTick + tickDelta;
+        
+        // Check collision (excluding all notes being moved)
+        const collision = hasNoteAtPosition(targetPitch, targetTick, null) && 
+          !Array.from(notesToMove).some(idx => {
+            const n = activeClip.notes[idx];
+            return n && n.pitch === targetPitch && Math.abs(n.startTick - targetTick) < ticksPerStep / 2;
+          });
+        
+        if (collision) {
+          hasAnyCollision = true;
+          break;
+        }
+      }
+      
+      if (hasAnyCollision) {
+        // Revert all notes to original positions
         const updatedNotes = [...activeClip.notes];
-        updatedNotes[draggedNoteIndex] = {
-          ...updatedNotes[draggedNoteIndex],
-          pitch: originalNotePosition.pitch,
-          startTick: originalNotePosition.startTick,
-        };
+        notesToMove.forEach(index => {
+          const originalPos = originalNotesPositions.get(index);
+          if (originalPos && updatedNotes[index]) {
+            updatedNotes[index] = {
+              ...updatedNotes[index],
+              pitch: originalPos.pitch,
+              startTick: originalPos.startTick,
+            };
+          }
+        });
         updateMidiClip(activeClip.id, { notes: updatedNotes });
       } else {
-        // Apply the move
+        // Apply the move to all selected notes
         const updatedNotes = [...activeClip.notes];
-        updatedNotes[draggedNoteIndex] = {
-          ...updatedNotes[draggedNoteIndex],
-          pitch: newPitch,
-          startTick: newTick,
-        };
+        notesToMove.forEach(index => {
+          const originalPos = originalNotesPositions.get(index);
+          if (originalPos && updatedNotes[index]) {
+            updatedNotes[index] = {
+              ...updatedNotes[index],
+              pitch: originalPos.pitch + pitchDelta,
+              startTick: originalPos.startTick + tickDelta,
+            };
+          }
+        });
         updateMidiClip(activeClip.id, { notes: updatedNotes });
       }
     }
@@ -553,6 +664,7 @@ export default function PianoRollView() {
     setDraggedNoteIndex(null);
     setDragOffset(null);
     setOriginalNotePosition(null);
+    setOriginalNotesPositions(new Map());
     setDragPosition(null);
     dragPositionRef.current = null;
     
@@ -560,6 +672,11 @@ export default function PianoRollView() {
     setIsCreatingSustainedNote(false);
     setSustainedNoteStartTick(null);
     setSustainedNoteIndex(null);
+    
+    // Reset box selection state
+    setIsBoxSelecting(false);
+    setBoxSelectStart(null);
+    setBoxSelectEnd(null);
   };
 
   // Handle velocity update
@@ -761,6 +878,19 @@ export default function PianoRollView() {
                 );
               });
             })()}
+
+            {/* Box Selection Overlay */}
+            {isBoxSelecting && boxSelectStart && boxSelectEnd && (
+              <div
+                className="absolute border-2 border-blue-400 bg-blue-400/20 pointer-events-none z-20"
+                style={{
+                  left: `${Math.min(boxSelectStart.x, boxSelectEnd.x)}px`,
+                  top: `${Math.min(boxSelectStart.y, boxSelectEnd.y)}px`,
+                  width: `${Math.abs(boxSelectEnd.x - boxSelectStart.x)}px`,
+                  height: `${Math.abs(boxSelectEnd.y - boxSelectStart.y)}px`,
+                }}
+              />
+            )}
 
             {/* Clickable Grid */}
             <div 
