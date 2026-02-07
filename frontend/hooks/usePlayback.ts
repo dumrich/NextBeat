@@ -17,6 +17,20 @@ function midiToNoteName(midiNote: number): string {
   return Tone.Frequency(midiNote, 'midi').toNote();
 }
 
+// Get release tail duration in bars based on instrument
+function getReleaseTail(instrumentId: string | null): number {
+  if (!instrumentId) return 0;
+  // Piano needs longer release for natural sound
+  if (instrumentId === 'piano' || instrumentId.includes('piano')) {
+    return 0.25; // ~0.5 seconds at 120 BPM
+  }
+  // Strings and guitar need moderate release
+  if (instrumentId === 'strings' || instrumentId === 'guitar') {
+    return 0.15; // ~0.3 seconds at 120 BPM
+  }
+  return 0;
+}
+
 // Convert MIDI velocity (0-127) to gain (0-1)
 function velocityToGain(velocity: number): number {
   return velocity / 127;
@@ -159,10 +173,14 @@ export function usePlayback(
             const noteName = midiToNoteName(note.pitch);
             // Convert duration from ticks to bars, then to Tone.js time string
             // This accurately preserves sustained note durations
-            const noteDurationBars = ticksToBars(note.durationTick, numerator, denominator);
+            let noteDurationBars = ticksToBars(note.durationTick, numerator, denominator);
+            
+            // Add instrument-specific release tail (prevents abrupt cutoff)
+            noteDurationBars += getReleaseTail(track.instrument);
+            
             // Convert bars to Tone.js time string using 'm' (measures/bars)
-            // This preserves the exact duration including sustained notes
-            const noteDuration = noteDurationBars > 0 ? `${noteDurationBars}m` : '8n';
+            // Ensure minimum duration of 0.01 bars for very short notes (prevents silence)
+            const noteDuration = `${Math.max(0.01, noteDurationBars)}m`;
             
             const event = new Tone.ToneEvent((time) => {
               // Use playNote which handles SoundFont instruments correctly
@@ -192,14 +210,19 @@ export function usePlayback(
             
             // All notes have the same velocity and duration
             const noteVelocity = notesAtTime[0].velocity;
-            const noteDurationBars = ticksToBars(notesAtTime[0].durationTick, numerator, denominator);
+            let noteDurationBars = ticksToBars(notesAtTime[0].durationTick, numerator, denominator);
+            
+            // Add instrument-specific release tail
+            noteDurationBars += getReleaseTail(track.instrument);
+            
             // Apply tempo scaling to duration to match tempo-scaled scheduling
             const tempoScaledDuration = noteDurationBars / (tempo / 240);
             
             // Convert MIDI velocity (0-127) to normalized velocity (0-1)
             const normalizedVelocity = noteVelocity / 127;
             
-            const noteDuration = noteDurationBars > 0 ? `${tempoScaledDuration}m` : '8n';
+            // Ensure minimum duration of 0.01 bars for very short notes
+            const noteDuration = `${Math.max(0.01, tempoScaledDuration)}m`;
             const event = new Tone.ToneEvent((time) => {
               // Use velocity parameter to set per-note volume without affecting other voices
               toneSynth.triggerAttackRelease(noteNames, noteDuration, time, normalizedVelocity);
@@ -211,14 +234,19 @@ export function usePlayback(
             // Play individual notes (different velocities/durations in chord, or single notes, or non-PolySynth)
             notesAtTime.forEach((note) => {
               const noteName = midiToNoteName(note.pitch);
-              const noteDurationBars = ticksToBars(note.durationTick, numerator, denominator);
+              let noteDurationBars = ticksToBars(note.durationTick, numerator, denominator);
+              
+              // Add instrument-specific release tail
+              noteDurationBars += getReleaseTail(track.instrument);
+              
               // Apply tempo scaling to duration to match tempo-scaled scheduling
               const tempoScaledDuration = noteDurationBars / (tempo / 240);
               
               // Convert MIDI velocity (0-127) to normalized velocity (0-1)
               const normalizedVelocity = note.velocity / 127;
               
-              const noteDuration = noteDurationBars > 0 ? `${tempoScaledDuration}m` : '8n';
+              // Ensure minimum duration of 0.01 bars for very short notes
+              const noteDuration = `${Math.max(0.01, tempoScaledDuration)}m`;
               const event = new Tone.ToneEvent((time) => {
                 // Use velocity parameter to set per-note volume without affecting other voices
                 toneSynth.triggerAttackRelease(noteName, noteDuration, time, normalizedVelocity);

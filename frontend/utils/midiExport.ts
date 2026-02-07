@@ -192,7 +192,7 @@ export async function importMidiFromArrayBuffer(
   mutators: MidiImportMutators
 ): Promise<void> {
   const { addTrack, addMidiClip, addArrangementClip, setTempo, setTimeSignature } = mutators;
-  const TICKS_PER_QUARTER_NOTE = 480;
+  const INTERNAL_PPQ = 480; // Our internal resolution
 
   if (!isMidiArrayBuffer(arrayBuffer)) {
     throw new Error('Invalid MIDI data. The server may have returned an error or non-MIDI content.');
@@ -225,8 +225,12 @@ export async function importMidiFromArrayBuffer(
   const timeSignature = midi.header.timeSignatures[0];
   const numerator = timeSignature?.timeSignature[0] || 4;
   const denominator = timeSignature?.timeSignature[1] || 4;
-  const TICKS_PER_BAR = (numerator * TICKS_PER_QUARTER_NOTE * 4) / denominator;
+  const TICKS_PER_BAR = (numerator * INTERNAL_PPQ * 4) / denominator;
 
+  // Read the actual PPQ from the MIDI file header to preserve timing accuracy
+  const filePPQ = midi.header.ppq || 480;
+  const ppqRatio = INTERNAL_PPQ / filePPQ; // Scale factor for tick conversion
+  
   const tempo = midi.header.tempos[0]?.bpm || 120;
   const baseTimestamp = Date.now();
 
@@ -238,8 +242,27 @@ export async function importMidiFromArrayBuffer(
     const trackId = `track-${timestamp}-${random}`;
 
     const notes = midiTrack.notes.map((note) => {
-      const startTick = Math.round((note.time * tempo / 60) * TICKS_PER_QUARTER_NOTE);
-      const durationTick = Math.round((note.duration * tempo / 60) * TICKS_PER_QUARTER_NOTE);
+      // Use tick values directly from the MIDI file if available, otherwise convert from seconds
+      // @tonejs/midi provides both ticks and time (seconds)
+      const noteTicks = (note as any).ticks;
+      const noteDurationTicks = (note as any).durationTicks;
+      
+      let startTick: number;
+      let durationTick: number;
+      
+      if (noteTicks !== undefined && noteDurationTicks !== undefined) {
+        // Use original tick values and scale to our internal resolution
+        startTick = Math.round(noteTicks * ppqRatio);
+        durationTick = Math.round(noteDurationTicks * ppqRatio);
+      } else {
+        // Fall back to converting from seconds (less precise due to rounding)
+        startTick = Math.round((note.time * tempo / 60) * INTERNAL_PPQ);
+        durationTick = Math.round((note.duration * tempo / 60) * INTERNAL_PPQ);
+      }
+      
+      // Ensure minimum duration (at least 1 tick to prevent invisible notes)
+      durationTick = Math.max(1, durationTick);
+      
       return {
         pitch: note.midi,
         startTick,

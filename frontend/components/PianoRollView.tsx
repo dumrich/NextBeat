@@ -844,6 +844,8 @@ export default function PianoRollView() {
                 }
                 
                 const stepDuration = note.durationTick / ticksPerStep;
+                // Ensure minimum width of 4px for visibility of very short notes
+                const noteDisplayWidth = Math.max(4, stepDuration * pixelsPerBar);
                 
                 return (
                   <div
@@ -858,7 +860,7 @@ export default function PianoRollView() {
                     style={{
                       top: `${baseTop}px`,
                       left: `${baseLeft}px`,
-                      width: `${stepDuration * pixelsPerBar}px`,
+                      width: `${noteDisplayWidth}px`,
                       height: `${noteHeight - 2}px`,
                       transform: transform || undefined,
                       // During drag, disable pointer events so mouse events pass through to grid
