@@ -44,7 +44,8 @@ export type Track = {
   color: string;
   type: 'instrument' | 'drums' | 'automation';
   channelRackIds: string[];
-  instrument: string | null;
+  instrument: string | null; // Can be InstrumentId or 'soundfont:instrumentName' or 'midi:programNumber'
+  midiProgram?: number; // MIDI program number (0-127) for SoundFont instruments
   mixerChannelId: string | null;
   mute: boolean;
   solo: boolean;

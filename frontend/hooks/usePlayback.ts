@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import * as Tone from 'tone';
 import type { Project, MidiNote } from '@/types/project';
 import { useInstruments } from './useInstruments';
+import { SoundfontInstrument } from '@/utils/soundfont';
 
 // Convert MIDI ticks to Tone.js time (in bars)
 // Assuming 1920 ticks per bar (standard MIDI resolution: 480 ticks per quarter note * 4)
@@ -28,7 +29,7 @@ export function usePlayback(
   tempo: number,
   setPlayheadPosition: (position: number) => void
 ) {
-  const { getSynthesizer } = useInstruments(project?.tracks || []);
+  const { getSynthesizer, playNote } = useInstruments(project?.tracks || []);
   const scheduledEventsRef = useRef<Tone.ToneEvent[]>([]);
   const playheadUpdateRef = useRef<number | null>(null);
 
@@ -65,10 +66,18 @@ export function usePlayback(
     // Schedule notes for each track
     tracksWithClips.forEach(({ track, clips }) => {
       const synth = getSynthesizer(track.id);
-      if (!synth || !('triggerAttackRelease' in synth)) return;
+      if (!synth) return;
+
+      // Check if it's a SoundFont instrument
+      const isSoundfont = synth instanceof SoundfontInstrument;
+      
+      // For Tone.js synths, check if they support triggerAttackRelease
+      if (!isSoundfont && !('triggerAttackRelease' in synth)) return;
 
       // PolySynth and other synthesizers that support triggerAttackRelease
-      const playable = synth as Tone.PolySynth | Tone.MonoSynth | Tone.Synth | Tone.FMSynth | Tone.AMSynth | Tone.DuoSynth | Tone.PluckSynth | Tone.MembraneSynth | Tone.MetalSynth;
+      const playable = isSoundfont 
+        ? synth as SoundfontInstrument
+        : synth as Tone.PolySynth | Tone.MonoSynth | Tone.Synth | Tone.FMSynth | Tone.AMSynth | Tone.DuoSynth | Tone.PluckSynth | Tone.MembraneSynth | Tone.MetalSynth;
 
       // Store base track volume - we'll combine this with note velocity per note
       const baseTrackVolume = track.volume;
@@ -131,65 +140,92 @@ export function usePlayback(
           lastStartBars + 0.00001
         );
         
-        // For PolySynth chords with same velocity, play together; otherwise play individually
-        const hasDifferentVelocities = notesAtTime.length > 1 && 
-          notesAtTime.some(note => note.velocity !== notesAtTime[0].velocity);
-        
-        // Check if all notes have the same duration (for chord playback)
-        const hasDifferentDurations = notesAtTime.length > 1 &&
-          notesAtTime.some(note => note.durationTick !== notesAtTime[0].durationTick);
-        
-        if (playable instanceof Tone.PolySynth && notesAtTime.length > 1 && !hasDifferentVelocities && !hasDifferentDurations) {
-          // Play chord: all notes have same velocity and duration, so we can play them together
-          const noteNames = notesAtTime.map(note => midiToNoteName(note.pitch));
-          
-          // All notes have the same velocity and duration
-          const noteVelocity = notesAtTime[0].velocity;
-          const noteDurationBars = ticksToBars(notesAtTime[0].durationTick);
-          
-          // Combine note velocity (0-127) with track volume (0-1)
-          // Final gain = (note.velocity / 127) * track.volume
-          const combinedGain = (noteVelocity / 127) * baseTrackVolume;
-          const velocityDb = Tone.gainToDb(combinedGain);
-          
-          const event = new Tone.ToneEvent((time) => {
-            // Set volume for this chord based on combined velocity
-            // Note: This affects all voices, but since all notes in chord have same velocity, it's OK
-            playable.volume.value = velocityDb;
-            playable.triggerAttackRelease(noteNames, noteDurationBars, time);
-          });
-          
-          event.start(adjustedStartBars);
-          scheduledEventsRef.current.push(event);
-        } else {
-          // Play individual notes (different velocities/durations in chord, or single notes, or non-PolySynth)
+        // Handle SoundFont instruments differently
+        if (isSoundfont) {
+          // Use playNote function which works correctly for SoundFont instruments
+          // Convert MIDI note numbers to note names for playNote
           notesAtTime.forEach((note) => {
             const noteName = midiToNoteName(note.pitch);
             const noteDurationBars = ticksToBars(note.durationTick);
-            
-            // Combine note velocity (0-127) with track volume (0-1)
-            // Final gain = (note.velocity / 127) * track.volume
-            const combinedGain = (note.velocity / 127) * baseTrackVolume;
-            const velocityDb = Tone.gainToDb(combinedGain);
+            // Convert bars to Tone.js time string (e.g., "4n", "8n")
+            // Approximate: 1 bar = 4 beats, so durationBars * 4 = beats
+            // For simplicity, convert to quarter notes: durationBars * 4 + "n"
+            const noteDuration = `${Math.max(1, Math.round(noteDurationBars * 4))}n`;
             
             const event = new Tone.ToneEvent((time) => {
-              // Set volume for this specific note based on its velocity
-              // Note: For PolySynth, this affects all voices, so chords with different velocities
-              // will be played individually (handled above)
-              playable.volume.value = velocityDb;
-              playable.triggerAttackRelease(noteName, noteDurationBars, time);
+              // Use playNote which handles SoundFont instruments correctly
+              // Don't pass time - let it play immediately when the event fires
+              // The ToneEvent already handles the scheduling at the correct time
+              playNote(track.id, noteName, noteDuration, undefined, note.velocity);
             });
             
             event.start(adjustedStartBars);
             scheduledEventsRef.current.push(event);
           });
+        } else {
+          // Tone.js synthesizers: handle chords and individual notes
+          const toneSynth = playable as Tone.PolySynth | Tone.MonoSynth | Tone.Synth | Tone.FMSynth | Tone.AMSynth | Tone.DuoSynth | Tone.PluckSynth | Tone.MembraneSynth | Tone.MetalSynth;
+          
+          // For PolySynth chords with same velocity, play together; otherwise play individually
+          const hasDifferentVelocities = notesAtTime.length > 1 && 
+            notesAtTime.some(note => note.velocity !== notesAtTime[0].velocity);
+          
+          // Check if all notes have the same duration (for chord playback)
+          const hasDifferentDurations = notesAtTime.length > 1 &&
+            notesAtTime.some(note => note.durationTick !== notesAtTime[0].durationTick);
+          
+          if (toneSynth instanceof Tone.PolySynth && notesAtTime.length > 1 && !hasDifferentVelocities && !hasDifferentDurations) {
+            // Play chord: all notes have same velocity and duration, so we can play them together
+            const noteNames = notesAtTime.map(note => midiToNoteName(note.pitch));
+            
+            // All notes have the same velocity and duration
+            const noteVelocity = notesAtTime[0].velocity;
+            const noteDurationBars = ticksToBars(notesAtTime[0].durationTick);
+            
+            // Combine note velocity (0-127) with track volume (0-1)
+            // Final gain = (note.velocity / 127) * track.volume
+            const combinedGain = (noteVelocity / 127) * baseTrackVolume;
+            const velocityDb = Tone.gainToDb(combinedGain);
+            
+            const event = new Tone.ToneEvent((time) => {
+              // Set volume for this chord based on combined velocity
+              // Note: This affects all voices, but since all notes in chord have same velocity, it's OK
+              toneSynth.volume.value = velocityDb;
+              toneSynth.triggerAttackRelease(noteNames, noteDurationBars, time);
+            });
+            
+            event.start(adjustedStartBars);
+            scheduledEventsRef.current.push(event);
+          } else {
+            // Play individual notes (different velocities/durations in chord, or single notes, or non-PolySynth)
+            notesAtTime.forEach((note) => {
+              const noteName = midiToNoteName(note.pitch);
+              const noteDurationBars = ticksToBars(note.durationTick);
+              
+              // Combine note velocity (0-127) with track volume (0-1)
+              // Final gain = (note.velocity / 127) * track.volume
+              const combinedGain = (note.velocity / 127) * baseTrackVolume;
+              const velocityDb = Tone.gainToDb(combinedGain);
+              
+              const event = new Tone.ToneEvent((time) => {
+                // Set volume for this specific note based on its velocity
+                // Note: For PolySynth, this affects all voices, so chords with different velocities
+                // will be played individually (handled above)
+                toneSynth.volume.value = velocityDb;
+                toneSynth.triggerAttackRelease(noteName, noteDurationBars, time);
+              });
+              
+              event.start(adjustedStartBars);
+              scheduledEventsRef.current.push(event);
+            });
+          }
         }
         
         // Update lastStartBars after processing all notes at this time
         lastStartBars = adjustedStartBars;
       });
     });
-  }, [project, tempo, getSynthesizer]);
+  }, [project, tempo, getSynthesizer, playNote]);
 
   // Update playhead position during playback
   useEffect(() => {

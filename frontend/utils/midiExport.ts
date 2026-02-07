@@ -147,13 +147,29 @@ export async function importMidiFile(
           const random = Math.random().toString(36).substr(2, 9);
           const trackId = `track-${timestamp}-${random}`;
           
+          // Get MIDI program number from track (default to 0 = Acoustic Grand Piano)
+          // MIDI program numbers are 0-127
+          // @tonejs/midi stores program changes in controlChanges with type 'program'
+          let midiProgram = 0;
+          if (midiTrack.controlChanges) {
+            // Look for program change events
+            const programChanges = Object.values(midiTrack.controlChanges).flat();
+            const programChange = programChanges.find((cc: any) => cc.type === 'program' || cc.number === 192);
+            if (programChange && programChange.value !== undefined) {
+              midiProgram = Math.round(programChange.value);
+            }
+          }
+          // Ensure program is in valid range (0-127)
+          midiProgram = Math.max(0, Math.min(127, midiProgram));
+          
           const track = {
             id: trackId,
             name: midiTrack.name || `Track ${trackIndex + 1}`,
             color: `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')}`,
             type: 'instrument' as const,
             channelRackIds: [],
-            instrument: 'piano', // Default instrument
+            instrument: `midi:${midiProgram}`, // Use MIDI program number for SoundFont instrument
+            midiProgram: midiProgram, // Store MIDI program number
             mixerChannelId: null,
             mute: false,
             solo: false,

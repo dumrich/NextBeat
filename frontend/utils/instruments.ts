@@ -1,6 +1,55 @@
 import * as Tone from 'tone';
+import { loadSoundfontInstrument, getSoundfontNameFromProgram, SoundfontInstrument } from './soundfont';
 
 export type InstrumentId = 'piano' | 'synth' | 'bass' | 'guitar' | 'strings' | 'brass' | 'drums' | 'percussion' | 'automation';
+
+// Map InstrumentId to MIDI program numbers (General MIDI)
+const INSTRUMENT_TO_MIDI_PROGRAM: Record<InstrumentId, number> = {
+  piano: 0,        // Acoustic Grand Piano
+  synth: 80,       // Lead 1 (square) - classic synth sound
+  bass: 32,        // Acoustic Bass
+  guitar: 24,      // Acoustic Guitar (nylon)
+  strings: 48,     // String Ensemble 1
+  brass: 56,       // Trumpet
+  drums: 0,       // Drums use channel 10 in MIDI, but we'll use program 0 as fallback
+  percussion: 112, // Tinkle Bell (percussive)
+  automation: 0,   // Automation tracks don't need sound
+};
+
+// Check if instrument string is a SoundFont instrument
+export function isSoundfontInstrument(instrument: string | null): boolean {
+  // All InstrumentId values now use SoundFont, plus explicit soundfont: and midi: prefixes
+  return instrument?.startsWith('soundfont:') || 
+         instrument?.startsWith('midi:') || 
+         (instrument !== null && Object.keys(INSTRUMENT_TO_MIDI_PROGRAM).includes(instrument)) ||
+         false;
+}
+
+// Get SoundFont instrument name from track instrument string
+export function getSoundfontInstrumentName(instrument: string | null, midiProgram?: number): string | null {
+  if (instrument?.startsWith('soundfont:')) {
+    return instrument.replace('soundfont:', '');
+  }
+  
+  // If midiProgram is provided, use it directly
+  if (midiProgram !== undefined) {
+    return getSoundfontNameFromProgram(midiProgram);
+  }
+  
+  // If it's a midi: prefix, extract the program number
+  if (instrument?.startsWith('midi:')) {
+    const program = parseInt(instrument.replace('midi:', ''));
+    return getSoundfontNameFromProgram(program);
+  }
+  
+  // If it's a known InstrumentId, map it to MIDI program number
+  if (instrument && instrument in INSTRUMENT_TO_MIDI_PROGRAM) {
+    const program = INSTRUMENT_TO_MIDI_PROGRAM[instrument as InstrumentId];
+    return getSoundfontNameFromProgram(program);
+  }
+  
+  return null;
+}
 
 export interface InstrumentConfig {
   id: InstrumentId;
@@ -8,8 +57,58 @@ export interface InstrumentConfig {
   createSynth: () => Tone.ToneAudioNode;
 }
 
-// Map instrument IDs to Tone.js synthesizers
-export function createInstrument(instrumentId: InstrumentId): Tone.ToneAudioNode {
+// Map instrument IDs to SoundFont instruments (with Tone.js fallback)
+export async function createInstrument(
+  instrumentId: InstrumentId | string,
+  audioContext?: AudioContext,
+  midiProgram?: number
+): Promise<Tone.ToneAudioNode | SoundfontInstrument> {
+  // Get audio context if not provided
+  if (!audioContext) {
+    // Use Tone.js context if available, otherwise create new one
+    try {
+      audioContext = Tone.getContext().rawContext as AudioContext;
+    } catch {
+      audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+  }
+
+  // Determine MIDI program number
+  let program: number | undefined = midiProgram;
+  
+  // If it's a known InstrumentId, map it to MIDI program number
+  if (instrumentId in INSTRUMENT_TO_MIDI_PROGRAM && !program) {
+    program = INSTRUMENT_TO_MIDI_PROGRAM[instrumentId as InstrumentId];
+  }
+  
+  // If it's a midi: prefix, extract the program number
+  if (instrumentId?.startsWith('midi:') && !program) {
+    program = parseInt(instrumentId.replace('midi:', ''));
+  }
+
+  // Try to load SoundFont instrument
+  const soundfontName = getSoundfontInstrumentName(instrumentId, program);
+  if (soundfontName) {
+    try {
+      const soundfont = await loadSoundfontInstrument(soundfontName, audioContext);
+      if (soundfont) {
+        // Verify the soundfont is actually valid before returning
+        // Check if it has the triggerAttackRelease method
+        if (soundfont && typeof (soundfont as any).triggerAttackRelease === 'function') {
+          return soundfont;
+        }
+      }
+    } catch (error) {
+      // SoundFont loading failed, will fall back to Tone.js
+    }
+  }
+
+  // Fallback to Tone.js synthesizers if SoundFont fails
+  return createToneInstrument(instrumentId as InstrumentId);
+}
+
+// Map instrument IDs to Tone.js synthesizers (synchronous version for backward compatibility)
+export function createToneInstrument(instrumentId: InstrumentId): Tone.ToneAudioNode {
   switch (instrumentId) {
     case 'piano':
       // Piano-like sound using FMSynth with bell-like characteristics
@@ -216,6 +315,27 @@ export function createInstrument(instrumentId: InstrumentId): Tone.ToneAudioNode
 export function getInstrumentName(instrumentId: InstrumentId | string | null): string {
   if (!instrumentId) return 'None';
   
+  // Handle MIDI program numbers
+  if (instrumentId.startsWith('midi:')) {
+    const program = parseInt(instrumentId.replace('midi:', ''));
+    const soundfontName = getSoundfontNameFromProgram(program);
+    // Convert soundfont name to readable format (e.g., "acoustic_grand_piano" -> "Acoustic Grand Piano")
+    return soundfontName
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+  
+  // Handle soundfont: prefix
+  if (instrumentId.startsWith('soundfont:')) {
+    const name = instrumentId.replace('soundfont:', '');
+    return name
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+  
+  // Handle regular InstrumentId
   const names: Record<InstrumentId, string> = {
     piano: 'Piano',
     synth: 'Synthesizer',
