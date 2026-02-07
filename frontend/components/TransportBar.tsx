@@ -166,16 +166,6 @@ export default function TransportBar() {
           max="512"
         />
       </div>
-
-      {/* Undo/Redo */}
-      <div className="flex items-center gap-2">
-        <button className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-sm transition">
-          ↶
-        </button>
-        <button className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-sm transition">
-          ↷
-        </button>
-      </div>
     </div>
   );
 }
