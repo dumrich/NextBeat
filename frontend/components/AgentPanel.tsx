@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useProjectStore } from '@/stores/projectStore';
 import { agentClient, type ProposedEdit } from '@/utils/agentClient';
 import { generateMidiFromPrompt } from '@/utils/midiGenerateClient';
-import { importMidiFromBlob } from '@/utils/midiExport';
+import { importMidiFromBlob, exportProjectToMidi } from '@/utils/midiExport';
 
 type AgentMode = 'chat' | 'generate' | 'actions' | 'autocomplete';
 
@@ -145,7 +145,17 @@ export default function AgentPanel() {
     setGenerateStatus(null);
 
     try {
-      const blob = await generateMidiFromPrompt(generatePrompt.trim());
+      // Export current project MIDI to send as context
+      let currentMidi: Blob | undefined;
+      if (project.tracks.length > 0 && project.midiClips.length > 0) {
+        try {
+          currentMidi = exportProjectToMidi(project);
+        } catch {
+          // If export fails, proceed without existing MIDI context
+        }
+      }
+
+      const blob = await generateMidiFromPrompt(generatePrompt.trim(), currentMidi);
 
       const { addTrack, addMidiClip, addArrangementClip, setTempo, setTimeSignature } =
         useProjectStore.getState();

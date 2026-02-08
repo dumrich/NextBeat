@@ -8,17 +8,36 @@ const TEXT_TO_MIDI_API_URL =
 // 2 minute timeout for generation (can take ~1 min)
 const FETCH_TIMEOUT_MS = 2 * 60 * 1000;
 
-export async function generateMidiFromPrompt(prompt: string): Promise<Blob> {
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      // Strip the "data:...;base64," prefix
+      resolve(dataUrl.split(',')[1]);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function generateMidiFromPrompt(prompt: string, currentMidi?: Blob): Promise<Blob> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
   try {
+    const body: { prompt: string; midi_base64?: string } = { prompt };
+
+    if (currentMidi) {
+      body.midi_base64 = await blobToBase64(currentMidi);
+    }
+
     const response = await fetch(TEXT_TO_MIDI_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
 
@@ -28,7 +47,7 @@ export async function generateMidiFromPrompt(prompt: string): Promise<Blob> {
       const contentType = response.headers.get('content-type') || '';
       if (contentType.includes('application/json')) {
         const json = await response.json().catch(() => ({}));
-        throw new Error(json.error || json.message || `Server error: ${response.status}`);
+        throw new Error(json.error || json.message || json.detail || `Server error: ${response.status}`);
       }
       const errorText = await response.text();
       throw new Error(`Failed to generate MIDI: ${response.status} ${errorText || response.statusText}`);
